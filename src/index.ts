@@ -1,5 +1,9 @@
 /**
- * index.ts - WhatsApp Personal Agent — main entry point.
+ * index.ts
+ * WhatsApp Personal Agent — main entry point.
+ *
+ * WAHA should be configured to POST inbound messages to:
+ *   http://your-server:3001/webhook
  */
 
 import 'dotenv/config'
@@ -11,6 +15,7 @@ import { runAgent } from './agent'
 const app = express()
 app.use(express.json())
 
+// ── Conversation history (in-memory, per chat) ────────────────────────────────
 export interface ChatEntry { sender: string; body: string; ts: Date }
 const chatHistory = new Map<string, ChatEntry[]>()
 const HISTORY_LIMIT = 40
@@ -26,11 +31,42 @@ export function getHistory(chatId: string): ChatEntry[] {
   return chatHistory.get(chatId) ?? []
 }
 
+// ── Rate limiter (prevent WhatsApp spam detection) ────────────────────────────
+const lastReplyAt = new Map<string, number>()
+const MIN_REPLY_INTERVAL_MS = 3000  // minimum 3s between replies per chat
+
+// ── Dedup (some gateways/WAHA deliver the same inbound message more than once,
+// e.g. via duplicate webhook events with slightly different payload shapes —
+// this can cause the SAME message to be processed twice with different results,
+// such as both a successful reply AND the "owner-only" rejection) ─────────────
+const recentMessages = new Map<string, number>()  // key: `${chatId}::${body}` -> ts
+const DEDUP_WINDOW_MS = 10000  // ignore an identical message in the same chat within 10s
+
+function isDuplicateMessage(chatId: string, body: string): boolean {
+  const key = `${chatId}::${body}`
+  const now = Date.now()
+  const last = recentMessages.get(key)
+
+  // periodic cleanup so the map doesn't grow forever
+  if (recentMessages.size > 1000) {
+    for (const [k, t] of recentMessages) {
+      if (now - t > DEDUP_WINDOW_MS) recentMessages.delete(k)
+    }
+  }
+
+  if (last !== undefined && now - last < DEDUP_WINDOW_MS) return true
+  recentMessages.set(key, now)
+  return false
+}
+
+// ── Health check ──────────────────────────────────────────────────────────────
 app.get('/', (_req, res) => {
   res.json({ status: 'ok', service: 'whatsapp-personal-agent' })
 })
 
+// ── Inbound webhook from WAHA ─────────────────────────────────────────────────
 app.post('/webhook', async (req, res) => {
+  // Validate secret (optional but recommended)
   if (config.webhookSecret) {
     const token = req.headers['x-webhook-secret'] ?? req.query.token
     if (token !== config.webhookSecret) {
@@ -38,14 +74,26 @@ app.post('/webhook', async (req, res) => {
       return
     }
   }
+
+  // Acknowledge immediately so WAHA doesn't retry
   res.json({ ok: true })
 
   const payload = req.body as Record<string, unknown>
+
+  // Only handle incoming messages
   const event = payload.event as string
   if (event && event !== 'message') return
 
   const msg = parseGatewayPayload(payload, config.ownerPhone)
-  if (!msg || !msg.body.trim()) return
+  if (!msg) return
+  if (!msg.body.trim()) return
+
+  // Skip duplicate deliveries of the same message (prevents double replies,
+  // e.g. one correct reply + one "owner-only" rejection for the same message)
+  if (isDuplicateMessage(msg.chatId, msg.body)) {
+    console.log(`[dedup] skipping duplicate message in ${msg.chatId}: ${msg.body.slice(0, 50)}`)
+    return
+  }
 
   // In private chats: only respond to owner
   if (!msg.isGroup && !msg.isFromOwner) {
@@ -53,12 +101,22 @@ app.post('/webhook', async (req, res) => {
     return
   }
 
-  // In groups: always log to history, respond only if addressed
+  // In groups: always log to history, respond ONLY on explicit mention
+  // NOTE: isReplyToBot is intentionally NOT used here — the bot runs on חגי's number,
+  // so any reply to חגי's messages (incl. manual) would wrongly trigger a response.
   if (msg.isGroup) {
     appendHistory(msg.chatId, msg.senderName, msg.body)
     const mentionsBot = /רגב|regev/i.test(msg.body)
-    if (!mentionsBot && !msg.isReplyToBot) return
+    if (!mentionsBot) return
   }
+
+  // Rate limit: at least 3s between replies to same chat
+  const now = Date.now()
+  if (now - (lastReplyAt.get(msg.chatId) ?? 0) < MIN_REPLY_INTERVAL_MS) {
+    console.log(`[rate-limit] skipping ${msg.chatId}`)
+    return
+  }
+  lastReplyAt.set(msg.chatId, now)
 
   console.log(`[${new Date().toISOString()}] ${msg.isGroup ? '👥' : '💬'} ${msg.senderName}: ${msg.body}`)
 
@@ -76,6 +134,7 @@ app.post('/webhook', async (req, res) => {
   }
 })
 
+// ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(config.port, () => {
   console.log(`🤖 WhatsApp Personal Agent running on port ${config.port}`)
   console.log(`   Owner phone: ${config.ownerPhone}`)
