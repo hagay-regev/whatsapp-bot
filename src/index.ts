@@ -88,26 +88,36 @@ app.post('/webhook', async (req, res) => {
   if (!msg) return
   if (!msg.body.trim()) return
 
+  // TEMP DEBUG: log every parsed inbound message before any filtering, so we
+  // can see exactly what chatId/senderPhone/isFromOwner WhatsApp sends for
+  // this chat (helps diagnose @lid vs @c.us routing issues).
+  console.log(`[debug-in] chatId=${msg.chatId} senderPhone=${msg.senderPhone} isFromOwner=${msg.isFromOwner} isGroup=${msg.isGroup} body="${msg.body.slice(0, 30)}"`)
+
   // Skip duplicate deliveries of the same message (prevents double replies,
-  // e.g. one correct reply + one "owner-only" rejection for the same message)
-  if (isDuplicateMessage(msg.chatId, msg.body)) {
+  // e.g. one correct reply + one "owner-only" rejection for the same message).
+  // For private chats, WhatsApp sometimes delivers the SAME message twice
+  // under different sender identifiers (e.g. <phone>@c.us and <lid>@lid),
+  // which would have different chatIds — so for private chats dedup on the
+  // message body alone (shared across all private chats), not the chatId.
+  const dedupKey = msg.isGroup ? msg.chatId : 'private'
+  if (isDuplicateMessage(dedupKey, msg.body)) {
     console.log(`[dedup] skipping duplicate message in ${msg.chatId}: ${msg.body.slice(0, 50)}`)
     return
   }
 
-  // In private chats: only respond to owner
+  // In private chats: only respond to owner.
   if (!msg.isGroup && !msg.isFromOwner) {
-    // WhatsApp sometimes delivers the SAME incoming message twice under
-    // different sender identifiers — once as a real phone number (@c.us,
-    // which matches OWNER_PHONE) and once as a privacy-preserving @lid
-    // identifier (a long pseudo-random ID that can never match a phone
-    // number). Don't send the "owner only" rejection for @lid deliveries:
-    // if it's really the owner, the matching @c.us delivery is handled
-    // normally below; for real strangers this just avoids a duplicate
-    // "sorry" message.
-    if (msg.chatId.includes('@lid')) return
-    await sendMessage(msg.chatId, 'מצטער, אני הבוט האישי של חגי. אינני יכול לעזור לך.')
-    return
+    // WhatsApp sometimes reports the owner's own messages using a
+    // privacy-preserving @lid identifier (a long pseudo-random ID) instead
+    // of the real phone number, which can never match OWNER_PHONE. Since
+    // this bot's private chat is only used by the owner, treat @lid senders
+    // in private chats as the owner rather than rejecting them.
+    if (msg.chatId.includes('@lid')) {
+      msg.isFromOwner = true
+    } else {
+      await sendMessage(msg.chatId, 'מצטער, אני הבוט האישי של חגי. אינני יכול לעזור לך.')
+      return
+    }
   }
 
   // In groups: always log to history, respond ONLY on explicit mention
