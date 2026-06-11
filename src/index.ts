@@ -97,6 +97,15 @@ app.post('/webhook', async (req, res) => {
 
   // In private chats: only respond to owner
   if (!msg.isGroup && !msg.isFromOwner) {
+    // WhatsApp sometimes delivers the SAME incoming message twice under
+    // different sender identifiers — once as a real phone number (@c.us,
+    // which matches OWNER_PHONE) and once as a privacy-preserving @lid
+    // identifier (a long pseudo-random ID that can never match a phone
+    // number). Don't send the "owner only" rejection for @lid deliveries:
+    // if it's really the owner, the matching @c.us delivery is handled
+    // normally below; for real strangers this just avoids a duplicate
+    // "sorry" message.
+    if (msg.chatId.includes('@lid')) return
     await sendMessage(msg.chatId, 'מצטער, אני הבוט האישי של חגי. אינני יכול לעזור לך.')
     return
   }
