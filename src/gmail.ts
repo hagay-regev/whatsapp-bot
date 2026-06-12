@@ -25,13 +25,19 @@ async function getGmailToken(): Promise<string> {
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
+interface GmailPart {
+  mimeType: string
+  body?:  { data?: string }
+  parts?: GmailPart[]
+}
+
 interface GmailMsg {
   id: string
   snippet?: string
   payload?: {
     headers?: Array<{ name: string; value: string }>
     body?:    { data?: string }
-    parts?:   Array<{ mimeType: string; body?: { data?: string }; parts?: Array<{ mimeType: string; body?: { data?: string } }> }>
+    parts?:   GmailPart[]
   }
   internalDate?: string
 }
@@ -49,8 +55,8 @@ function decodeBody(msg: GmailMsg): string {
   if (direct) return direct
 
   // find text/plain part (possibly nested)
-  const allParts: Array<{ mimeType: string; body?: { data?: string } }> = []
-  const collect = (parts?: typeof allParts) => { if (parts) { allParts.push(...parts); (parts as GmailMsg['payload']['parts']).forEach(p => collect(p.parts)) } }
+  const allParts: GmailPart[] = []
+  const collect = (parts?: GmailPart[]) => { if (parts) { allParts.push(...parts); parts.forEach(p => collect(p.parts)) } }
   collect(msg.payload?.parts)
 
   const plain = allParts.find(p => p.mimeType === 'text/plain')

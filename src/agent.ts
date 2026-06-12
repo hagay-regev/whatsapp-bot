@@ -8,7 +8,8 @@ import { config } from './config'
 import { buildMemoryPrompt, saveRule, saveFact, savePerson, deleteRule, deleteFact } from './memory'
 import { createEvent, getSchedule, updateEvent, deleteEvent } from './calendar'
 import { searchEmails, getEmailContent, sendEmail, listInbox } from './gmail'
-import type { InboundMessage, ChatEntry } from './whatsapp'
+import type { InboundMessage } from './whatsapp'
+import type { ChatEntry } from './index'
 
 const client = new Anthropic({ apiKey: config.anthropicApiKey })
 
@@ -194,6 +195,8 @@ ${buildMemoryPrompt()}
 - "תראה מיילים", "מה יש במייל" → list_inbox | חיפוש → search_emails | "שלח מייל" → send_email
 - תאריכים יחסיים ("מחר", "ביום שלישי") — חשב לפי התאריך של היום
 - טון: נעים עם קורט ציניות — לא גס, לא יבש
+- **בקבוצה: אל תציע פעולות שאינך יכול לבצע** (הסרת חברים, בלוק, ניהול קבוצה וכו')
+- **הודעה אחת בלבד** — אל תפצל תשובות למספר הודעות
 `
 }
 

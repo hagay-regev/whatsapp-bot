@@ -55,13 +55,21 @@ export function parseGatewayPayload(raw: Record<string, unknown>, ownerPhone: st
     const from = String(p.from ?? '')
     const isGroup = from.includes('@g.us')
 
-    // In groups, the real sender is in a nested field
+    // In groups, whatsapp-web.js puts the real sender in `author`
+    // (string id, or a wid object with `_serialized` in some versions).
+    const author = p.author as unknown
+    const authorId =
+      typeof author === 'string' ? author :
+      String((author as Record<string, unknown>)?._serialized ?? '')
     const senderRaw = isGroup
-      ? String((p.sender as Record<string, unknown>)?.id ?? p.from ?? '')
+      ? (authorId || String((p.sender as Record<string, unknown>)?.id ?? p.from ?? ''))
       : from
 
     const senderPhone = senderRaw.replace(/@.*$/, '').replace(/[^\d]/g, '')
-    const senderName  = String(p.notifyName ?? senderPhone)
+
+    // Push name lives in the raw `_data` of the serialized message, not top-level
+    const rawData = p._data as Record<string, unknown> | undefined
+    const senderName = String(p.notifyName ?? rawData?.notifyName ?? senderPhone)
 
     const normalizedOwner  = ownerPhone.replace(/\D/g, '')
     const isFromOwner = senderPhone.endsWith(normalizedOwner.slice(-9)) ||
