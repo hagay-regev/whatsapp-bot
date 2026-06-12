@@ -120,13 +120,21 @@ app.post('/webhook', async (req, res) => {
     }
   }
 
+  // History key: private chats may arrive under different chat ids for the same
+  // conversation (@c.us vs @lid), so key all private history under one bucket —
+  // this bot serves a single owner, so there is only one private conversation.
+  const historyKey = msg.isGroup ? msg.chatId : 'private'
+
   // In groups: always log to history, respond ONLY on explicit mention
   // NOTE: isReplyToBot is intentionally NOT used here — the bot runs on חגי's number,
   // so any reply to חגי's messages (incl. manual) would wrongly trigger a response.
   if (msg.isGroup) {
-    appendHistory(msg.chatId, msg.senderName, msg.body)
+    appendHistory(historyKey, msg.senderName, msg.body)
     const mentionsBot = /רגב|regev/i.test(msg.body)
     if (!mentionsBot) return
+  } else {
+    // Private chats get history too, so follow-ups like "תסמן שנקרא" keep context
+    appendHistory(historyKey, 'חגי', msg.body)
   }
 
   // Rate limit: at least 3s between replies to same chat
@@ -140,11 +148,11 @@ app.post('/webhook', async (req, res) => {
   console.log(`[${new Date().toISOString()}] ${msg.isGroup ? '👥' : '💬'} ${msg.senderName}: ${msg.body}`)
 
   try {
-    const history = msg.isGroup ? getHistory(msg.chatId) : []
+    const history = getHistory(historyKey)
     const reply = await runAgent(msg, history)
     if (reply) {
       await sendMessage(msg.chatId, reply)
-      if (msg.isGroup) appendHistory(msg.chatId, 'רגב', reply)
+      appendHistory(historyKey, 'רגב', reply)
       console.log(`[reply] ${reply.slice(0, 80)}`)
     }
   } catch (err) {

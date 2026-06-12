@@ -7,7 +7,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { config } from './config'
 import { buildMemoryPrompt, saveRule, saveFact, savePerson, deleteRule, deleteFact } from './memory'
 import { createEvent, getSchedule, updateEvent, deleteEvent } from './calendar'
-import { searchEmails, getEmailContent, sendEmail, listInbox } from './gmail'
+import { searchEmails, getEmailContent, sendEmail, listInbox, markEmailRead, trashEmail } from './gmail'
 import type { InboundMessage } from './whatsapp'
 import type { ChatEntry } from './index'
 
@@ -140,6 +140,28 @@ const tools: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'mark_email_read',
+    description: 'סמן מייל כנקרא. השתמש כשמבקשים "תסמן שנקרא", "סמן כנקרא". אם אין ID — חפש קודם עם list_inbox/search_emails.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        email_id: { type: 'string', description: 'מזהה המייל (ID)' },
+      },
+      required: ['email_id'],
+    },
+  },
+  {
+    name: 'delete_email',
+    description: 'העבר מייל לאשפה. השתמש כשמבקשים "תמחק את המייל". אם אין ID — חפש קודם עם list_inbox/search_emails.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        email_id: { type: 'string', description: 'מזהה המייל (ID)' },
+      },
+      required: ['email_id'],
+    },
+  },
+  {
     name: 'send_email',
     description: 'שלח מייל. השתמש רק כשמבקשים במפורש לשלוח.',
     input_schema: {
@@ -160,7 +182,7 @@ function buildSystemPrompt(msg: InboundMessage, history: ChatEntry[] = []): stri
   const today = new Date().toLocaleDateString('he-IL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Jerusalem' })
   const time  = new Date().toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem' })
 
-  const historySection = history.length > 1
+  const historySection = msg.isGroup && history.length > 1
     ? `\n# הודעות אחרונות בקבוצה\n${history.slice(-20).map(h =>
         `[${h.ts.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem' })}] ${h.sender}: ${h.body}`
       ).join('\n')}\n`
@@ -191,8 +213,9 @@ ${buildMemoryPrompt()}
 - "זכור ש..." / הנחיות → save_rule או save_fact
 - כשמספרים על אדם → save_person
 - בקשות יומן → add_calendar_event / get_schedule / update_calendar_event / delete_calendar_event
-- בקשות מייל → list_inbox / search_emails / get_email / send_email
+- בקשות מייל → list_inbox / search_emails / get_email / send_email / mark_email_read / delete_email
 - "תראה מיילים", "מה יש במייל" → list_inbox | חיפוש → search_emails | "שלח מייל" → send_email
+- "תסמן שנקרא" / "תמחק את המייל" → אם הזכרת מייל קודם בשיחה השתמש ב-ID שלו; אחרת חפש קודם
 - תאריכים יחסיים ("מחר", "ביום שלישי") — חשב לפי התאריך של היום
 - טון: נעים עם קורט ציניות — לא גס, לא יבש
 - **בקבוצה: אל תציע פעולות שאינך יכול לבצע** (הסרת חברים, בלוק, ניהול קבוצה וכו')
@@ -263,6 +286,12 @@ async function handleTool(name: string, input: Record<string, unknown>): Promise
     case 'get_email':
       return await getEmailContent(s('email_id'))
 
+    case 'mark_email_read':
+      return await markEmailRead(s('email_id'))
+
+    case 'delete_email':
+      return await trashEmail(s('email_id'))
+
     case 'send_email':
       return await sendEmail({ to: s('to'), subject: s('subject'), body: s('body') })
 
@@ -273,8 +302,26 @@ async function handleTool(name: string, input: Record<string, unknown>): Promise
 
 // ── Main agent loop ───────────────────────────────────────────────────────────
 
+/** In private chats, replay the conversation as real user/assistant turns so the
+ *  model has context for follow-ups ("תסמן שנקרא" right after an email listing). */
+function buildPrivateMessages(msg: InboundMessage, history: ChatEntry[]): Anthropic.MessageParam[] {
+  const turns: Anthropic.MessageParam[] = history.slice(-20).map(h => ({
+    role: h.sender === 'רגב' ? 'assistant' as const : 'user' as const,
+    content: h.body,
+  }))
+  // First message must be a user turn
+  while (turns.length && turns[0].role === 'assistant') turns.shift()
+  // Make sure the current message is the last user turn
+  if (!turns.length || turns[turns.length - 1].role !== 'user') {
+    turns.push({ role: 'user', content: msg.body })
+  }
+  return turns
+}
+
 export async function runAgent(msg: InboundMessage, history: ChatEntry[] = []): Promise<string> {
-  const messages: Anthropic.MessageParam[] = [{ role: 'user', content: msg.body }]
+  const messages: Anthropic.MessageParam[] = msg.isGroup
+    ? [{ role: 'user', content: msg.body }]
+    : buildPrivateMessages(msg, history)
 
   while (true) {
     const res = await client.messages.create({

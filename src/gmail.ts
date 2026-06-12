@@ -154,6 +154,36 @@ export async function sendEmail(opts: {
   return `✉️ מייל נשלח בהצלחה ל-${opts.to}!`
 }
 
+// ── Mark as read / trash ──────────────────────────────────────────────────────
+
+const SCOPE_HINT = 'אין לי הרשאה לשנות מיילים — חגי צריך להריץ מחדש את get-token.js ולעדכן את GOOGLE_REFRESH_TOKEN'
+
+export async function markEmailRead(emailId: string): Promise<string> {
+  const token = await getGmailToken()
+  const res = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${emailId}/modify`,
+    {
+      method:  'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ removeLabelIds: ['UNREAD'] }),
+    }
+  )
+  if (res.status === 403) throw new Error(SCOPE_HINT)
+  if (!res.ok) throw new Error(`Gmail modify ${res.status}`)
+  return `✅ המייל סומן כנקרא`
+}
+
+export async function trashEmail(emailId: string): Promise<string> {
+  const token = await getGmailToken()
+  const res = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${emailId}/trash`,
+    { method: 'POST', headers: { Authorization: `Bearer ${token}` } }
+  )
+  if (res.status === 403) throw new Error(SCOPE_HINT)
+  if (!res.ok) throw new Error(`Gmail trash ${res.status}`)
+  return `🗑️ המייל הועבר לאשפה`
+}
+
 // ── List unread inbox ─────────────────────────────────────────────────────────
 
 export async function listInbox(unreadOnly = true, maxResults = 8): Promise<string> {
