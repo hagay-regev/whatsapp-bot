@@ -1,8 +1,12 @@
 /**
- * calendar.ts - Google Calendar integration for רגב
+ * calendar.ts
+ * Google Calendar integration for רגב.
+ * אירועים שרגב יוצר מסומנים ב-✦ בשם.
  */
 
-const BOT_MARK = '✦'
+const BOT_MARK = '✦'  // אימוג'י קטן לאירועים שרגב יצר
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
 
 export async function getAccessToken(): Promise<string> {
   const res = await fetch('https://oauth2.googleapis.com/token', {
@@ -20,29 +24,42 @@ export async function getAccessToken(): Promise<string> {
   return data.access_token!
 }
 
+// ── Calendar ID resolution ────────────────────────────────────────────────────
+
 export function resolveCalendarId(name?: string): string {
   const personal = process.env.GOOGLE_CALENDAR_PERSONAL ?? 'primary'
   const family   = process.env.GOOGLE_CALENDAR_FAMILY   ?? personal
   const work     = process.env.GOOGLE_CALENDAR_WORK     ?? personal
+
   if (!name) return personal
   const n = name.toLowerCase()
-  if (n.includes('משפח') || n.includes('family')) return family
-  if (n.includes('עבוד') || n.includes('work') || n.includes('regev')) return work
-  if (n.includes('אישי') || n.includes('personal')) return personal
+  if (n.includes('משפח') || n.includes('family'))                           return family
+  if (n.includes('עבוד') || n.includes('work') || n.includes('regev'))     return work
+  if (n.includes('אישי') || n.includes('personal'))                         return personal
   return personal
 }
 
+// ── Create event ──────────────────────────────────────────────────────────────
+
 export async function createEvent(opts: {
-  title: string; datetime: string; end_datetime?: string
-  all_day?: boolean; description?: string; calendarName?: string; attendees?: string[]
+  title: string
+  datetime: string          // YYYY-MM-DDTHH:MM:00
+  end_datetime?: string
+  all_day?: boolean
+  description?: string
+  calendarName?: string
+  attendees?: string[]
 }): Promise<string> {
   const { title, datetime, end_datetime, all_day, description, calendarName, attendees } = opts
   const [datePart, timePart] = datetime.split('T')
   if (!datePart) return `❌ פורמט תאריך לא תקין: ${datetime}`
+
   const token      = await getAccessToken()
   const calendarId = resolveCalendarId(calendarName)
+
   let start: Record<string, string>
   let end: Record<string, string>
+
   if (all_day || !timePart) {
     const nextDay = new Date(datePart + 'T00:00:00Z')
     nextDay.setUTCDate(nextDay.getUTCDate() + 1)
@@ -60,75 +77,121 @@ export async function createEvent(opts: {
     start = { dateTime: datetime,  timeZone: 'Asia/Jerusalem' }
     end   = { dateTime: endDt,     timeZone: 'Asia/Jerusalem' }
   }
+
   const event: Record<string, unknown> = {
-    summary: `${title} ${BOT_MARK}`, description: description ?? 'נוצר דרך רגב',
-    start, end, reminders: { useDefault: false, overrides: all_day ? [] : [{ method: 'popup', minutes: 30 }] },
+    summary:     `${title} ${BOT_MARK}`,
+    description: description ?? 'נוצר דרך רגב',
+    start, end,
+    reminders: { useDefault: false, overrides: all_day ? [] : [{ method: 'popup', minutes: 30 }] },
   }
   if (attendees?.length) event.attendees = attendees.map(email => ({ email }))
-  const res = await fetch(
+
+  const res  = await fetch(
     `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
     { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(event) },
   )
   const data = await res.json() as { error?: unknown }
   if (!res.ok) throw new Error(JSON.stringify(data.error).slice(0, 150))
+
   const dateStr  = datePart.slice(5).replace('-', '/')
   const timeStr  = timePart ? timePart.slice(0, 5) : 'כל היום'
   const calLabel = calendarName ? ` (${calendarName})` : ''
   return `📅 נוסף ביומן${calLabel}:\n*${title}*\n${dateStr} ⏰ ${timeStr}`
 }
 
-export async function getSchedule(opts: { date?: string; date_end?: string; search?: string; calendarName?: string }): Promise<string> {
+// ── Get schedule ──────────────────────────────────────────────────────────────
+
+export async function getSchedule(opts: {
+  date?: string
+  date_end?: string
+  search?: string
+  calendarName?: string
+}): Promise<string> {
   const token   = await getAccessToken()
   const today   = new Date().toISOString().slice(0, 10)
   const date    = opts.date ?? today
   const dateEnd = opts.date_end ?? date
   const search  = opts.search?.toLowerCase() ?? ''
+
   const personal = process.env.GOOGLE_CALENDAR_PERSONAL ?? 'primary'
   const family   = process.env.GOOGLE_CALENDAR_FAMILY   ?? personal
   const work     = process.env.GOOGLE_CALENDAR_WORK     ?? personal
+
   let calIds: string[]
   const cn = (opts.calendarName ?? '').toLowerCase()
-  if (cn.includes('משפח') || cn.includes('family')) calIds = [family]
-  else if (cn.includes('עבוד') || cn.includes('work')) calIds = [work]
+  if (cn.includes('משפח') || cn.includes('family'))       calIds = [family]
+  else if (cn.includes('עבוד') || cn.includes('work'))    calIds = [work]
   else if (cn.includes('אישי') || cn.includes('personal')) calIds = [personal]
   else calIds = Array.from(new Set([personal, family, work]))
+
   const timeMin = `${date}T00:00:00+03:00`
   const timeMax = `${dateEnd}T23:59:59+03:00`
-  type GEvent = { summary?: string; start?: { dateTime?: string; date?: string } }
+
+  type GEvent = { summary?: string; start?: { dateTime?: string; date?: string }; end?: { dateTime?: string; date?: string } }
   const all: Array<GEvent & { calId: string }> = []
+
   for (const calId of calIds) {
     const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`)
-    url.searchParams.set('timeMin', timeMin); url.searchParams.set('timeMax', timeMax)
-    url.searchParams.set('singleEvents', 'true'); url.searchParams.set('orderBy', 'startTime'); url.searchParams.set('maxResults', '20')
+    url.searchParams.set('timeMin', timeMin)
+    url.searchParams.set('timeMax', timeMax)
+    url.searchParams.set('singleEvents', 'true')
+    url.searchParams.set('orderBy', 'startTime')
+    url.searchParams.set('maxResults', '20')
     if (search) url.searchParams.set('q', search)
+
     const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } })
     if (!res.ok) continue
     const data = await res.json() as { items?: GEvent[] }
     for (const e of data.items ?? []) all.push({ ...e, calId })
   }
-  const filtered = search ? all.filter(e => (e.summary ?? '').toLowerCase().includes(search)) : all
-  if (filtered.length === 0) return `📅 אין אירועים ${date === today ? 'היום' : date.slice(5).replace('-', '/')}.`
+
+  const filtered = search
+    ? all.filter(e => (e.summary ?? '').toLowerCase().includes(search))
+    : all
+
+  if (filtered.length === 0) {
+    const label = date === today ? 'היום' : date.slice(5).replace('-', '/')
+    return `📅 אין אירועים ${label}.`
+  }
+
   const lines = filtered.map(e => {
-    const dt = e.start?.dateTime; const d = e.start?.date
+    const dt = e.start?.dateTime
+    const d  = e.start?.date
     const time = dt ? dt.split('T')[1]?.slice(0, 5) : 'כל היום'
     const dateStr = (dt ?? d ?? '').slice(5, 10).replace('-', '/')
     return `• ${dateStr} ${time} — ${e.summary ?? '(ללא שם)'}`
   })
-  const label = date === dateEnd ? (date === today ? 'היום' : date.slice(5).replace('-', '/')) : `${date.slice(5).replace('-','/')}–${dateEnd.slice(5).replace('-','/')}`
+
+  const label = date === dateEnd
+    ? (date === today ? 'היום' : date.slice(5).replace('-', '/'))
+    : `${date.slice(5).replace('-','/')}–${dateEnd.slice(5).replace('-','/')}`
+
   return `📅 לוח זמנים ${label}:\n${lines.join('\n')}`
 }
 
-export async function updateEvent(params: { search: string; new_title?: string; new_datetime?: string; new_end_datetime?: string; new_calendar?: string; all_day?: boolean }): Promise<string> {
+// ── Update event ──────────────────────────────────────────────────────────────
+
+export async function updateEvent(params: {
+  search: string
+  new_title?: string
+  new_datetime?: string
+  new_end_datetime?: string
+  new_calendar?: string
+  all_day?: boolean
+}): Promise<string> {
   const token    = await getAccessToken()
   const personal = process.env.GOOGLE_CALENDAR_PERSONAL ?? 'primary'
   const family   = process.env.GOOGLE_CALENDAR_FAMILY   ?? personal
   const work     = process.env.GOOGLE_CALENDAR_WORK     ?? personal
   const allCals  = Array.from(new Set([personal, family, work]))
-  const now      = new Date()
-  const timeMin  = new Date(now.getTime() - 7 * 86400000).toISOString()
-  const timeMax  = new Date(now.getTime() + 365 * 86400000).toISOString()
-  type CalEvent  = { id: string; summary: string; calendarId: string; start?: { dateTime?: string; date?: string } }
+
+  const now     = new Date()
+  const timeMin = new Date(now.getTime() - 7 * 86400000).toISOString()
+  const timeMax = new Date(now.getTime() + 365 * 86400000).toISOString()
+
+  type CalEvent = { id: string; summary: string; calendarId: string; start?: { dateTime?: string; date?: string } }
   let found: CalEvent | null = null
+
   for (const calId of allCals) {
     const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`)
     url.searchParams.set('timeMin', timeMin); url.searchParams.set('timeMax', timeMax)
@@ -139,10 +202,13 @@ export async function updateEvent(params: { search: string; new_title?: string; 
     const match = (data.items ?? []).find(e => (e.summary ?? '').toLowerCase().includes(params.search.toLowerCase()))
     if (match) { found = { id: match.id, summary: match.summary ?? '', calendarId: calId, start: match.start }; break }
   }
+
   if (!found) return `❌ לא מצאתי אירוע עם "${params.search}".`
+
+  // Move to different calendar
   if (params.new_calendar) {
     const destCalId = resolveCalendarId(params.new_calendar)
-    if (destCalId === found.calendarId) return 'ℹ️ האירוע כבר נמצא ביומן זה.'
+    if (destCalId === found.calendarId) return `ℹ️ האירוע כבר נמצא ביומן זה.`
     const res = await fetch(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(found.calendarId)}/events/${found.id}/move?destination=${encodeURIComponent(destCalId)}`,
       { method: 'POST', headers: { Authorization: `Bearer ${token}` } },
@@ -150,6 +216,7 @@ export async function updateEvent(params: { search: string; new_title?: string; 
     if (!res.ok) throw new Error(`Move error: ${res.status}`)
     return `✅ "${found.summary}" הועבר ליומן ${params.new_calendar}.`
   }
+
   const patch: Record<string, unknown> = {}
   if (params.new_title) patch.summary = `${params.new_title} ${BOT_MARK}`
   if (params.new_datetime) {
@@ -161,7 +228,9 @@ export async function updateEvent(params: { search: string; new_title?: string; 
       : (() => { const [d,t] = startStr.split('T'); const [h,m] = (t??'').split(':').map(Number); const e = h*60+m+60; return `${d}T${String(Math.floor(e/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}:00` })()
     patch.end = { dateTime: endStr, timeZone: 'Asia/Jerusalem' }
   }
+
   if (Object.keys(patch).length === 0) return '❌ לא הבנתי מה לשנות.'
+
   const res = await fetch(
     `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(found.calendarId)}/events/${found.id}`,
     { method: 'PATCH', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(patch) },
@@ -170,17 +239,22 @@ export async function updateEvent(params: { search: string; new_title?: string; 
   return `✅ "${found.summary}" עודכן!`
 }
 
+// ── Delete event ──────────────────────────────────────────────────────────────
+
 export async function deleteEvent(search: string): Promise<string> {
   const token    = await getAccessToken()
   const personal = process.env.GOOGLE_CALENDAR_PERSONAL ?? 'primary'
   const family   = process.env.GOOGLE_CALENDAR_FAMILY   ?? personal
   const work     = process.env.GOOGLE_CALENDAR_WORK     ?? personal
   const allCals  = Array.from(new Set([personal, family, work]))
-  const now      = new Date()
-  const timeMin  = new Date(now.getTime() - 7 * 86400000).toISOString()
-  const timeMax  = new Date(now.getTime() + 365 * 86400000).toISOString()
+
+  const now     = new Date()
+  const timeMin = new Date(now.getTime() - 7 * 86400000).toISOString()
+  const timeMax = new Date(now.getTime() + 365 * 86400000).toISOString()
+
   type CE = { id: string; summary: string; calendarId: string }
   const matches: CE[] = []
+
   for (const calId of allCals) {
     const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`)
     url.searchParams.set('timeMin', timeMin); url.searchParams.set('timeMax', timeMax)
@@ -192,7 +266,9 @@ export async function deleteEvent(search: string): Promise<string> {
       if ((e.summary ?? '').toLowerCase().includes(search.toLowerCase())) matches.push({ id: e.id, summary: e.summary ?? '', calendarId: calId })
     }
   }
+
   if (matches.length === 0) return `❌ לא מצאתי אירוע עם "${search}".`
+
   const deleted: string[] = []
   for (const ev of matches) {
     const res = await fetch(
@@ -201,7 +277,8 @@ export async function deleteEvent(search: string): Promise<string> {
     )
     if (res.ok || res.status === 204 || res.status === 410) deleted.push(ev.summary)
   }
-  if (deleted.length === 0) return '❌ לא הצלחתי למחוק.'
+
+  if (deleted.length === 0) return `❌ לא הצלחתי למחוק.`
   if (deleted.length === 1) return `🗑️ "${deleted[0]}" נמחק!`
   return `🗑️ נמחקו ${deleted.length} אירועים:\n${deleted.map(s => `• ${s}`).join('\n')}`
 }
