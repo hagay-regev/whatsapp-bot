@@ -8,6 +8,8 @@
 
 import 'dotenv/config'
 import express from 'express'
+import fs from 'fs'
+import path from 'path'
 import { config } from './config'
 import { parseGatewayPayload, sendMessage } from './whatsapp'
 import { runAgent } from './agent'
@@ -15,16 +17,34 @@ import { runAgent } from './agent'
 const app = express()
 app.use(express.json())
 
-// ── Conversation history (in-memory, per chat) ────────────────────────────────
+// ── Conversation history (per chat, persisted to disk) ────────────────────────
 export interface ChatEntry { sender: string; body: string; ts: Date }
-const chatHistory = new Map<string, ChatEntry[]>()
+const HISTORY_PATH = path.join(__dirname, '..', 'chat-history.json')
 const HISTORY_LIMIT = 40
+
+function loadHistory(): Map<string, ChatEntry[]> {
+  try {
+    const raw = JSON.parse(fs.readFileSync(HISTORY_PATH, 'utf-8')) as Record<string, Array<ChatEntry & { ts: string }>>
+    return new Map(Object.entries(raw).map(([k, v]) => [k, v.map(e => ({ ...e, ts: new Date(e.ts) }))]))
+  } catch {
+    return new Map()
+  }
+}
+
+const chatHistory = loadHistory()
+
+function persistHistory() {
+  fs.writeFile(HISTORY_PATH, JSON.stringify(Object.fromEntries(chatHistory)), err => {
+    if (err) console.error('[history] persist failed:', err.message)
+  })
+}
 
 function appendHistory(chatId: string, sender: string, body: string) {
   if (!chatHistory.has(chatId)) chatHistory.set(chatId, [])
   const hist = chatHistory.get(chatId)!
   hist.push({ sender, body, ts: new Date() })
   if (hist.length > HISTORY_LIMIT) hist.splice(0, hist.length - HISTORY_LIMIT)
+  persistHistory()
 }
 
 export function getHistory(chatId: string): ChatEntry[] {
