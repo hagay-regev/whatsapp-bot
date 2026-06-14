@@ -7,14 +7,16 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
-import WebSocket from 'ws'
+// ws has no bundled types; only used as the realtime transport on Node 20.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const WS = require('ws')
 import { config } from './config'
 
 // Node 20 has no native WebSocket; supabase-js realtime needs one supplied.
 // We don't use realtime, but createClient initializes it regardless.
 const db = createClient(config.supabaseUrl, config.supabaseKey, {
   auth: { persistSession: false },
-  realtime: { transport: WebSocket as unknown as typeof globalThis.WebSocket },
+  realtime: { transport: WS },
 })
 
 // ── Owner + clients resolution (cached) ───────────────────────────────────────
