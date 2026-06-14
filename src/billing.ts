@@ -61,6 +61,20 @@ async function getClients(): Promise<Client[]> {
   return clientsCache.v
 }
 
+// Dates must be computed in Israel time — the work day/week boundary is local,
+// not UTC (otherwise late-evening entries land on the wrong day).
+function ilToday(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date())
+}
+function ilDow(dateStr: string): number { // 0=Sunday ... 6=Saturday
+  return new Date(dateStr + 'T12:00:00Z').getUTCDay()
+}
+function addDays(dateStr: string, n: number): string {
+  const d = new Date(dateStr + 'T12:00:00Z')
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+
 function matchClient(clients: Client[], name: string): Client | undefined {
   const n = name.toLowerCase().trim()
   if (!n) return undefined
@@ -84,7 +98,7 @@ export async function logHours(opts: {
   if (!matched) return `❌ לא מצאתי לקוח בשם "${opts.client_name}". לקוחות:\n${clients.slice(0, 10).map(c => `• ${c.name}`).join('\n')}`
 
   const uid = await ownerId()
-  const date = opts.date ?? new Date().toISOString().slice(0, 10)
+  const date = opts.date ?? ilToday()
   const type = opts.type ?? 'maintenance'
   const fmt = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}:00`
   const startMin = (opts.start_time ? Number(opts.start_time.split(':')[0]) || 8 : 8) * 60
@@ -105,7 +119,7 @@ export async function queryHours(opts: {
   period?: 'today' | 'week' | 'month'; date_from?: string; date_to?: string; list?: boolean
 } = {}): Promise<string> {
   const uid = await ownerId()
-  const today = new Date().toISOString().slice(0, 10)
+  const today = ilToday()
   const list = opts.list ?? false
 
   // Explicit date range (model-driven) takes priority over period presets.
@@ -117,8 +131,9 @@ export async function queryHours(opts: {
   } else {
     const period = opts.period ?? 'today'
     to = today
-    if (period === 'week') { const d = new Date(); d.setDate(d.getDate() - d.getDay()); from = d.toISOString().slice(0, 10) }
-    else if (period === 'month') { from = today.slice(0, 7) + '-01' }
+    // Work week is Sunday–Saturday (Israeli week).
+    if (period === 'week') from = addDays(today, -ilDow(today))
+    else if (period === 'month') from = today.slice(0, 7) + '-01'
     else from = today
     label = ({ today: 'היום', week: 'השבוע', month: 'החודש' } as Record<string, string>)[period]
   }
