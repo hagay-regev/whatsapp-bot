@@ -101,34 +101,48 @@ export async function logHours(opts: {
   return `✅ דיווח נשמר!\n🏢 ${matched.name}\n🕐 ${opts.hours}h — ${TYPE_LABEL[type] ?? type}\n📅 ${date}${opts.description ? `\n📝 ${opts.description}` : ''}`
 }
 
-export async function queryHours(period: 'today' | 'week' | 'month' = 'today', list = false): Promise<string> {
+export async function queryHours(opts: {
+  period?: 'today' | 'week' | 'month'; date_from?: string; date_to?: string; list?: boolean
+} = {}): Promise<string> {
   const uid = await ownerId()
   const today = new Date().toISOString().slice(0, 10)
-  let from = today
-  if (period === 'week') { const d = new Date(); d.setDate(d.getDate() - d.getDay()); from = d.toISOString().slice(0, 10) }
-  else if (period === 'month') { from = today.slice(0, 7) + '-01' }
-  const label: Record<string, string> = { today: 'היום', week: 'השבוע', month: 'החודש' }
+  const list = opts.list ?? false
+
+  // Explicit date range (model-driven) takes priority over period presets.
+  let from: string, to: string, label: string
+  if (opts.date_from) {
+    from = opts.date_from
+    to = opts.date_to ?? opts.date_from
+    label = from === to ? from : `${from} עד ${to}`
+  } else {
+    const period = opts.period ?? 'today'
+    to = today
+    if (period === 'week') { const d = new Date(); d.setDate(d.getDate() - d.getDay()); from = d.toISOString().slice(0, 10) }
+    else if (period === 'month') { from = today.slice(0, 7) + '-01' }
+    else from = today
+    label = ({ today: 'היום', week: 'השבוע', month: 'החודש' } as Record<string, string>)[period]
+  }
 
   if (list) {
     const { data } = await db.from('time_entries')
       .select('date, work_hours, description, clients(name)')
-      .eq('user_id', uid).gte('date', from).lte('date', today)
+      .eq('user_id', uid).gte('date', from).lte('date', to)
       .order('date', { ascending: false }).limit(10)
     const rows = (data ?? []) as Array<{ date: string; work_hours: number; description: string; clients?: { name?: string } | null }>
-    if (!rows.length) return `📋 אין דיווחים ${label[period]}.`
-    return `📋 דיווחים אחרונים:\n${rows.map(r => `• ${r.date.slice(5)} | ${r.clients?.name ?? '—'} | ${Number(r.work_hours).toFixed(1)}h${r.description ? ` — ${r.description.slice(0, 30)}` : ''}`).join('\n')}`
+    if (!rows.length) return `📋 אין דיווחים (${label}).`
+    return `📋 דיווחים (${label}):\n${rows.map(r => `• ${r.date.slice(5)} | ${r.clients?.name ?? '—'} | ${Number(r.work_hours).toFixed(1)}h${r.description ? ` — ${r.description.slice(0, 30)}` : ''}`).join('\n')}`
   }
 
   const { data } = await db.from('time_entries')
     .select('work_hours, travel_hours, clients(name)')
-    .eq('user_id', uid).gte('date', from).lte('date', today)
+    .eq('user_id', uid).gte('date', from).lte('date', to)
   const rows = (data ?? []) as Array<{ work_hours: number; travel_hours: number; clients?: { name?: string } | null }>
   const work = rows.reduce((s, r) => s + Number(r.work_hours ?? 0), 0)
   const travel = rows.reduce((s, r) => s + Number(r.travel_hours ?? 0), 0)
   const byClient = new Map<string, number>()
   for (const r of rows) byClient.set(r.clients?.name ?? '—', (byClient.get(r.clients?.name ?? '—') ?? 0) + Number(r.work_hours ?? 0))
   const top = Array.from(byClient.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([n, h]) => `  • ${n}: ${h.toFixed(1)}h`).join('\n')
-  return `📊 סיכום שעות — ${label[period]}\n⏱ עבודה: ${work.toFixed(1)}h${travel > 0 ? `\n🚗 נסיעות: ${travel.toFixed(1)}h` : ''}\n📋 ${rows.length} דיווחים${top ? `\n\nלפי לקוח:\n${top}` : ''}`
+  return `📊 סיכום שעות — ${label}\n⏱ עבודה: ${work.toFixed(1)}h${travel > 0 ? `\n🚗 נסיעות: ${travel.toFixed(1)}h` : ''}\n📋 ${rows.length} דיווחים${top ? `\n\nלפי לקוח:\n${top}` : ''}`
 }
 
 // ── Billing ───────────────────────────────────────────────────────────────────

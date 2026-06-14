@@ -181,12 +181,14 @@ const tools: Anthropic.Tool[] = [
   },
   {
     name: 'query_hours',
-    description: 'סיכום או רשימת שעות עבודה. "כמה שעות עבדתי היום/השבוע/החודש", "הדיווחים שלי".',
+    description: 'סיכום או רשימת שעות עבודה. לשאלה על יום/טווח ספציפי ("ביום שישי האחרון", "ב-12/6", "בין ה-1 ל-7") — חשב את התאריכים לפי היום והעבר date_from/date_to. ל"היום/השבוע/החודש" אפשר period.',
     input_schema: {
       type: 'object' as const,
       properties: {
-        period: { type: 'string', description: 'today / week / month' },
-        list:   { type: 'boolean', description: 'true = רשימת דיווחים, false = סיכום' },
+        date_from: { type: 'string', description: 'תאריך התחלה YYYY-MM-DD (ליום בודד שים אותו תאריך גם ב-date_to)' },
+        date_to:   { type: 'string', description: 'תאריך סיום YYYY-MM-DD' },
+        period:    { type: 'string', description: 'today / week / month (חלופה ל-date_from כשהשאלה כללית)' },
+        list:      { type: 'boolean', description: 'true = רשימת דיווחים מפורטת, false = סיכום' },
       },
       required: [],
     },
@@ -380,7 +382,12 @@ async function handleTool(name: string, input: Record<string, unknown>): Promise
       })
 
     case 'query_hours':
-      return await queryHours((s('period') || 'today') as 'today' | 'week' | 'month', b('list'))
+      return await queryHours({
+        date_from: s('date_from') || undefined,
+        date_to:   s('date_to') || undefined,
+        period:    (s('period') || undefined) as 'today' | 'week' | 'month' | undefined,
+        list:      b('list'),
+      })
 
     case 'query_billing':
       return await queryBilling({
