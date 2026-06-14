@@ -438,6 +438,44 @@ async function handleTool(name: string, input: Record<string, unknown>): Promise
   }
 }
 
+// ── Group gate: let the model decide if רגב is being addressed ─────────────────
+// Replaces the old "respond only on the word רגב" rule. Runs on a cheap/fast
+// model for every group message, with recent history for context (so follow-ups
+// to רגב work without naming him). When in doubt → stay silent.
+
+export async function shouldRespondInGroup(msg: InboundMessage, history: ChatEntry[]): Promise<boolean> {
+  const convo = history.slice(-12)
+    .map(h => `${h.sender}: ${h.body}`)
+    .join('\n')
+
+  try {
+    const res = await client.messages.create({
+      model: 'claude-haiku-4-5',
+      max_tokens: 10,
+      system: `אתה שומר-סף לבוט בשם "רגב" — העוזר האישי של חגי — שנמצא בקבוצת וואטסאפ.
+תפקידך: להחליט אם ההודעה האחרונה מכוונת לרגב ומצפה לתשובה ממנו.
+
+ענה YES אם:
+- פונים לרגב בשמו ("רגב", "regev")
+- שואלים שאלה שברור שמכוונת לעוזר/לבוט (מידע, יומן, מייל, חישוב, חיפוש וכו')
+- ממשיכים שיחה קיימת שבה רגב כבר השתתף (תשובה/המשך להודעה של רגב)
+
+ענה NO אם:
+- זו שיחה רגילה בין אנשים שלא קשורה לרגב
+- ההודעה לא מצפה לתגובה מהבוט
+
+בספק — ענה NO. עדיף לשתוק מאשר להתפרץ לשיחה. ענה במילה אחת: YES או NO.`,
+      messages: [{ role: 'user', content: `שיחה אחרונה בקבוצה:\n${convo}\n\n← האם ההודעה האחרונה מכוונת לרגב?` }],
+    })
+    const out = res.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map(b => b.text).join('').toUpperCase()
+    return out.includes('YES')
+  } catch (err) {
+    console.error('[group-gate] error:', err)
+    // On failure, fall back to explicit-name only (don't go silent on real mentions)
+    return /רגב|regev/i.test(msg.body)
+  }
+}
+
 // ── Main agent loop ───────────────────────────────────────────────────────────
 
 /** In private chats, replay the conversation as real user/assistant turns so the

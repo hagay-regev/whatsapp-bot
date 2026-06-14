@@ -12,7 +12,7 @@ import fs from 'fs'
 import path from 'path'
 import { config } from './config'
 import { parseGatewayPayload, sendMessage } from './whatsapp'
-import { runAgent } from './agent'
+import { runAgent, shouldRespondInGroup } from './agent'
 
 const app = express()
 app.use(express.json())
@@ -113,21 +113,6 @@ app.post('/webhook', async (req, res) => {
   // this chat (helps diagnose @lid vs @c.us routing issues).
   console.log(`[debug-in] chatId=${msg.chatId} senderPhone=${msg.senderPhone} isFromOwner=${msg.isFromOwner} isGroup=${msg.isGroup} body="${msg.body.slice(0, 30)}"`)
 
-  // TEMP DEBUG: dump quote/reply structure for group messages so we can detect
-  // "reply to רגב" reliably (whatsapp-web.js stores quote info in _data).
-  if (msg.isGroup) {
-    const rp = (payload.payload ?? payload) as Record<string, unknown>
-    const rd = (rp._data ?? {}) as Record<string, unknown>
-    const qm = (rp.quotedMsg ?? rd.quotedMsg) as Record<string, unknown> | undefined
-    console.log('[debug-quote]', JSON.stringify({
-      hasQuotedMsg: rp.hasQuotedMsg,
-      topQuotKeys: Object.keys(rp).filter(k => /quot/i.test(k)),
-      dataQuotKeys: Object.keys(rd).filter(k => /quot/i.test(k)),
-      quotedParticipant: rd.quotedParticipant ?? rp.quotedParticipant,
-      quotedMsgFromMe: qm?.fromMe,
-    }))
-  }
-
   // Skip duplicate deliveries of the same message (prevents double replies,
   // e.g. one correct reply + one "owner-only" rejection for the same message).
   // For private chats, WhatsApp sometimes delivers the SAME message twice
@@ -160,13 +145,13 @@ app.post('/webhook', async (req, res) => {
   // this bot serves a single owner, so there is only one private conversation.
   const historyKey = msg.isGroup ? msg.chatId : 'private'
 
-  // In groups: always log to history, respond ONLY on explicit mention
-  // NOTE: isReplyToBot is intentionally NOT used here — the bot runs on חגי's number,
-  // so any reply to חגי's messages (incl. manual) would wrongly trigger a response.
+  // In groups: always log to history, then let the model decide if רגב is being
+  // addressed. Explicit name → respond immediately (cheap fast-path); otherwise
+  // ask the lightweight gate (with history context) whether to chime in.
   if (msg.isGroup) {
     appendHistory(historyKey, msg.senderName, msg.body)
-    const mentionsBot = /רגב|regev/i.test(msg.body)
-    if (!mentionsBot) return
+    const explicit = /רגב|regev/i.test(msg.body)
+    if (!explicit && !(await shouldRespondInGroup(msg, getHistory(historyKey)))) return
   } else {
     // Private chats get history too, so follow-ups like "תסמן שנקרא" keep context
     appendHistory(historyKey, 'חגי', msg.body)
