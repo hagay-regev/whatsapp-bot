@@ -13,6 +13,7 @@ import path from 'path'
 import { config } from './config'
 import { parseGatewayPayload, sendMessage } from './whatsapp'
 import { runAgent, shouldRespondInGroup } from './agent'
+import { transcribeVoice } from './voice'
 
 const app = express()
 app.use(express.json())
@@ -103,6 +104,18 @@ app.post('/webhook', async (req, res) => {
   // Only handle incoming messages
   const event = payload.event as string
   if (event && event !== 'message') return
+
+  // Voice messages have no text body — transcribe first (Gemini), then treat
+  // the transcript exactly like a typed message. Gateway attaches mediaData.
+  const rawP = (payload.payload ?? payload) as Record<string, unknown>
+  if (!String(rawP.body ?? '').trim() && (rawP.type === 'ptt' || rawP.type === 'audio')) {
+    try {
+      rawP.body = await transcribeVoice(rawP)
+      console.log(`[voice] transcribed: ${String(rawP.body).slice(0, 80)}`)
+    } catch (err) {
+      console.error('[voice] failed:', (err as Error).message)
+    }
+  }
 
   const msg = parseGatewayPayload(payload, config.ownerPhone)
   if (!msg) return

@@ -15,4 +15,5 @@ export const config = {
   webhookSecret:   process.env.WEBHOOK_SECRET ?? '',
   supabaseUrl:     process.env.SUPABASE_URL ?? '',
   supabaseKey:     process.env.SUPABASE_SERVICE_ROLE_KEY ?? '',
+  geminiKey:       process.env.GEMINI_API_KEY ?? '',
 }
