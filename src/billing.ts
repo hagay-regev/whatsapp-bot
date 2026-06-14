@@ -7,10 +7,14 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
+import WebSocket from 'ws'
 import { config } from './config'
 
+// Node 20 has no native WebSocket; supabase-js realtime needs one supplied.
+// We don't use realtime, but createClient initializes it regardless.
 const db = createClient(config.supabaseUrl, config.supabaseKey, {
   auth: { persistSession: false },
+  realtime: { transport: WebSocket as unknown as typeof globalThis.WebSocket },
 })
 
 // ── Owner + clients resolution (cached) ───────────────────────────────────────
