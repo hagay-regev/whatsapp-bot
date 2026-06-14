@@ -55,8 +55,8 @@ let clientsCache: { v: Client[]; t: number } | null = null
 
 async function getClients(): Promise<Client[]> {
   if (clientsCache && Date.now() - clientsCache.t < 5 * 60_000) return clientsCache.v
-  const uid = await ownerId()
-  const { data } = await db.from('clients').select('id, name').eq('user_id', uid)
+  // clients is a global/org table — no per-user ownership column.
+  const { data } = await db.from('clients').select('id, name').order('name')
   clientsCache = { v: (data ?? []) as Client[], t: Date.now() }
   return clientsCache.v
 }
