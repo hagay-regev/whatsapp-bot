@@ -13,4 +13,6 @@ export const config = {
   ownerPhone:      required('OWNER_PHONE'),
   port:            parseInt(process.env.PORT ?? '3001'),
   webhookSecret:   process.env.WEBHOOK_SECRET ?? '',
+  supabaseUrl:     process.env.SUPABASE_URL ?? '',
+  supabaseKey:     process.env.SUPABASE_SERVICE_ROLE_KEY ?? '',
 }

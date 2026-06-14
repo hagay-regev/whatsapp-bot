@@ -8,6 +8,7 @@ import { config } from './config'
 import { buildMemoryPrompt, saveRule, saveFact, savePerson, deleteRule, deleteFact } from './memory'
 import { createEvent, getSchedule, updateEvent, deleteEvent } from './calendar'
 import { searchEmails, getEmailContent, sendEmail, listInbox, markEmailRead, trashEmail } from './gmail'
+import { logHours, queryHours, queryBilling, updateBilling, createTask, updateTask, listTasks } from './billing'
 import type { InboundMessage } from './whatsapp'
 import type { ChatEntry } from './index'
 
@@ -161,6 +162,83 @@ const tools: Anthropic.Tool[] = [
       required: ['email_id'],
     },
   },
+  // ── תשלומים / שעות / משימות (מסד הנתונים של אפליקציית התשלומים) ──
+  {
+    name: 'log_hours',
+    description: 'דווח שעות עבודה ללקוח. השתמש כש: "3 שעות לכפרית, אינסטלציה", "שעה לרגב בתשלום".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_name: { type: 'string', description: 'שם הלקוח' },
+        hours:       { type: 'number', description: 'מספר שעות' },
+        type:        { type: 'string', description: 'maintenance (תחזוקה) / paid_implementation (בתשלום) / order_implementation (מהזמנה)' },
+        description: { type: 'string', description: 'תיאור העבודה' },
+        date:        { type: 'string', description: 'YYYY-MM-DD (ברירת מחדל: היום)' },
+        start_time:  { type: 'string', description: 'שעת התחלה HH:MM (אופציונלי)' },
+      },
+      required: ['client_name', 'hours'],
+    },
+  },
+  {
+    name: 'query_hours',
+    description: 'סיכום או רשימת שעות עבודה. "כמה שעות עבדתי היום/השבוע/החודש", "הדיווחים שלי".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        period: { type: 'string', description: 'today / week / month' },
+        list:   { type: 'boolean', description: 'true = רשימת דיווחים, false = סיכום' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'query_billing',
+    description: 'שאילתת חשבוניות/גבייה. "כמה יש לי לגבות", "מה פתוח אצל כפרית".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_name: { type: 'string', description: 'סינון לפי לקוח (אופציונלי)' },
+        status:      { type: 'string', description: 'unpaid (לגבייה) / paid / all' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'update_billing',
+    description: 'עדכן חיוב: סמן כשולם / חשבונית הונפקה / קבלה. פעולה רגישה — אשר עם חגי לפני הקריאה.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_name:     { type: 'string', description: 'שם הלקוח' },
+        period:          { type: 'string', description: 'תקופה לסינון (אופציונלי) — בלי זה כל השורות הפתוחות' },
+        is_paid:         { type: 'boolean', description: 'סמן כשולם' },
+        invoice_created: { type: 'boolean', description: 'חשבונית הונפקה' },
+        receipt_issued:  { type: 'boolean', description: 'קבלה הונפקה' },
+      },
+      required: ['client_name'],
+    },
+  },
+  {
+    name: 'manage_tasks',
+    description: 'משימות: יצירה/עדכון/רשימה. "צור משימה...", "סגור משימה...", "המשימות שלי". (משימה ≠ תזכורת ביומן)',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        op:                    { type: 'string', description: 'create / update / list' },
+        title:                 { type: 'string', description: 'כותרת (ל-create)' },
+        search:                { type: 'string', description: 'מילות חיפוש לזיהוי המשימה (ל-update)' },
+        status:                { type: 'string', description: 'open / in_progress / done / cancelled' },
+        client_name:           { type: 'string', description: 'לקוח משויך (אופציונלי)' },
+        priority:              { type: 'string', description: 'low / medium / high / urgent' },
+        category:              { type: 'string', description: 'development / quote / marketing / support / general' },
+        description:           { type: 'string' },
+        due_date:              { type: 'string', description: 'YYYY-MM-DD' },
+        due_time:              { type: 'string', description: 'HH:MM' },
+        remind_before_minutes: { type: 'number', description: 'התראה כמה דקות לפני' },
+      },
+      required: ['op'],
+    },
+  },
   {
     name: 'send_email',
     description: 'שלח מייל. השתמש רק כשמבקשים במפורש לשלוח.',
@@ -216,6 +294,13 @@ ${buildMemoryPrompt()}
 - בקשות מייל → list_inbox / search_emails / get_email / send_email / mark_email_read / delete_email
 - "תראה מיילים", "מה יש במייל" → list_inbox | חיפוש → search_emails | "שלח מייל" → send_email
 - "תסמן שנקרא" / "תמחק את המייל" → אם הזכרת מייל קודם בשיחה השתמש ב-ID שלו; אחרת חפש קודם
+
+# תשלומים, שעות ומשימות (אפליקציית התשלומים)
+- "X שעות ל<לקוח>, <תיאור>" → log_hours | "כמה שעות עבדתי..." / "הדיווחים שלי" → query_hours
+- "כמה לגבות" / "מה פתוח אצל <לקוח>" → query_billing | "סמן ש<לקוח> שילם / הנפיקו חשבונית" → update_billing (אשר עם חגי קודם!)
+- "צור משימה..." / "סגור משימה..." / "המשימות שלי" → manage_tasks
+- **הבחנה חשובה:** "תזכיר לי מחר ב-9 ל..." = אירוע ביומן → add_calendar_event. "צור משימה..." = משימה אמיתית → manage_tasks. אל תבלבל ביניהם; אם לא ברור — שאל.
+- שמות לקוחות מותאמים אוטומטית (התאמה חלקית). אם לקוח לא נמצא — הצג את הרשימה ובקש הבהרה.
 - תאריכים יחסיים ("מחר", "ביום שלישי") — חשב לפי התאריך של היום
 - טון: נעים עם קורט ציניות — לא גס, לא יבש
 - **בקבוצה: אל תציע פעולות שאינך יכול לבצע** (הסרת חברים, בלוק, ניהול קבוצה וכו')
@@ -282,6 +367,52 @@ async function handleTool(name: string, input: Record<string, unknown>): Promise
         query:       s('query'),
         maxResults:  typeof input.max_results === 'number' ? input.max_results : 8,
       })
+
+    // תשלומים / שעות / משימות
+    case 'log_hours':
+      return await logHours({
+        client_name: s('client_name'),
+        hours:       Number(input.hours),
+        type:        s('type') || undefined,
+        description: s('description') || undefined,
+        date:        s('date') || undefined,
+        start_time:  s('start_time') || undefined,
+      })
+
+    case 'query_hours':
+      return await queryHours((s('period') || 'today') as 'today' | 'week' | 'month', b('list'))
+
+    case 'query_billing':
+      return await queryBilling({
+        client_name: s('client_name') || undefined,
+        status:      (s('status') || 'unpaid') as 'unpaid' | 'paid' | 'all',
+      })
+
+    case 'update_billing':
+      return await updateBilling({
+        client_name:     s('client_name'),
+        period:          s('period') || undefined,
+        is_paid:         b('is_paid'),
+        invoice_created: b('invoice_created'),
+        receipt_issued:  b('receipt_issued'),
+      })
+
+    case 'manage_tasks': {
+      const op = s('op')
+      const rbm = typeof input.remind_before_minutes === 'number' ? input.remind_before_minutes : undefined
+      if (op === 'create') return await createTask({
+        title: s('title'), client_name: s('client_name') || undefined,
+        priority: s('priority') || undefined, category: s('category') || undefined,
+        description: s('description') || undefined, due_date: s('due_date') || undefined,
+        due_time: s('due_time') || undefined, remind_before_minutes: rbm,
+      })
+      if (op === 'update') return await updateTask({
+        search: s('search') || s('title'), status: s('status') || undefined,
+        due_date: s('due_date') || undefined, due_time: s('due_time') || undefined,
+        remind_before_minutes: rbm,
+      })
+      return await listTasks({ status: s('status') || undefined, client_name: s('client_name') || undefined })
+    }
 
     case 'get_email':
       return await getEmailContent(s('email_id'))
