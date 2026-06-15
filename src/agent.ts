@@ -257,14 +257,14 @@ const tools: Anthropic.Tool[] = [
   },
   {
     name: 'send_whatsapp',
-    description: 'שלח הודעת וואטסאפ לאדם אחר. קרא לזה רק *אחרי* שחגי אישר (👍/כן) את הנמען והתוכן. השתמש במספר שהתקבל מ-find_contact.',
+    description: 'שלח הודעת וואטסאפ לאדם אחר. קרא לזה רק *אחרי* שחגי אישר (👍/כן). העבר את שם איש הקשר (כפי שהתקבל מ-find_contact) — המערכת תפענח את המספר האמיתי בעצמה ולא תשלח אם אין התאמה ודאית.',
     input_schema: {
       type: 'object' as const,
       properties: {
-        phone:   { type: 'string', description: 'מספר הנמען (מ-find_contact)' },
-        message: { type: 'string', description: 'תוכן ההודעה לשליחה' },
+        contact_name: { type: 'string', description: 'שם איש הקשר (כפי שהוחזר מ-find_contact)' },
+        message:      { type: 'string', description: 'תוכן ההודעה לשליחה' },
       },
-      required: ['phone', 'message'],
+      required: ['contact_name', 'message'],
     },
   },
   {
@@ -331,11 +331,12 @@ ${buildMemoryPrompt()}
 - שמות לקוחות מותאמים אוטומטית (התאמה חלקית). אם לקוח לא נמצא — הצג את הרשימה ובקש הבהרה.
 
 # שליחת וואטסאפ לאנשים אחרים
-- "שלח ל<שם> ש..." / "תכתוב ל<שם>..." → קודם find_contact לאיתור המספר.
-- אם יש כמה התאמות — הצג ובקש לדייק.
+- "שלח ל<שם> ש..." / "תכתוב ל<שם>..." → **תמיד** קודם find_contact לאיתור המספר.
+- **לעולם אל תמציא או תנחש מספר טלפון.** מותר להציג רק מספר ושם שחזרו בפועל מ-find_contact. אם find_contact החזיר ריק — אסור לומר "נמצא" ואסור להציג מספר.
 - **אם לא נמצא — אל תוותר ואל תגיד "לא מצאתי" מיד.** נסה שוב עם וריאציות: רק שם פרטי, פחות אותיות (תחילית), או איות אחר (עברית/אנגלית, עם/בלי ו'). הצג את האפשרויות הקרובות שמצאת ושאל את חגי "התכוונת ל...?". רק אם באמת אין שום דבר דומה אחרי כמה ניסיונות — אמור שלא מצאת.
-- **לפני שליחה: הצג לחגי את הנמען (שם + מספר) ואת תוכן ההודעה, ובקש אישור.** דוגמה: "אשלח לדני כהן (0521234567): \"אאחר ב-10 דקות\" — 👍 לאישור".
-- **אל תקרא ל-send_whatsapp עד שחגי מאשר במפורש** — 👍, "כן", או "אשר". רק אז שלח עם המספר שאותר.
+- **לפני שליחה: הצג לחגי את הנמען (שם + מספר מ-find_contact) ואת תוכן ההודעה, ובקש אישור.** דוגמה: "אשלח לדני כהן (0521234567): \"אאחר ב-10 דקות\" — 👍 לאישור".
+- **אל תקרא ל-send_whatsapp עד שחגי מאשר במפורש** — 👍, "כן", או "אשר". העבר ל-send_whatsapp את *שם* איש הקשר (לא מספר); המערכת תפענח אותו מחדש.
+- **אחרי שליחה מוצלחת — אשר לחגי שנשלח: למי (שם) ומה.**
 - זו פעולה שיוצאת החוצה לאנשים אחרים — אל תמציא תוכן; שלח בדיוק מה שחגי ביקש.
 - תאריכים יחסיים ("מחר", "ביום שלישי") — חשב לפי התאריך של היום
 - טון: נעים עם קורט ציניות — לא גס, לא יבש
@@ -462,9 +463,15 @@ async function handleTool(name: string, input: Record<string, unknown>): Promise
       return matches.map(c => `• ${c.name} — ${c.number}`).join('\n')
     }
 
-    case 'send_whatsapp':
-      await sendMessage(s('phone'), s('message'))
-      return `✅ נשלח ל-${s('phone')}`
+    case 'send_whatsapp': {
+      const matches = await findContacts(s('contact_name'))
+      if (matches.length === 0)
+        return `❌ לא מצאתי איש קשר בשם "${s('contact_name')}" — לא שלחתי כלום.`
+      if (matches.length > 1)
+        return `❌ יש כמה אנשי קשר בשם "${s('contact_name')}":\n${matches.map(c => `• ${c.name} — ${c.number}`).join('\n')}\nתדייק למי, לא שלחתי.`
+      await sendMessage(matches[0].number, s('message'))
+      return `✅ נשלח ל-${matches[0].name} (${matches[0].number})`
+    }
 
     case 'get_email':
       return await getEmailContent(s('email_id'))
