@@ -11,6 +11,7 @@ import { searchEmails, getEmailContent, sendEmail, listInbox, markEmailRead, tra
 import { logHours, queryHours, queryBilling, updateBilling, createTask, updateTask, listTasks } from './billing'
 import { findContacts } from './contacts'
 import { sendMessage } from './whatsapp'
+import { recordUsage, getUsageReport } from './usage'
 import type { InboundMessage } from './whatsapp'
 import type { ChatEntry } from './index'
 
@@ -268,6 +269,17 @@ const tools: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'usage_report',
+    description: 'דווח כמה טוקנים/כסף רגב צרך. "כמה צרכת היום/החודש", "כמה אתה עולה לי".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        period: { type: 'string', description: 'today / month' },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'send_email',
     description: 'שלח מייל. השתמש רק כשמבקשים במפורש לשלוח.',
     input_schema: {
@@ -306,6 +318,7 @@ const STABLE_SYSTEM = `אתה רגב — הבוט האישי של חגי רגב-
 - "X שעות ל<לקוח>, <תיאור>" → log_hours | "כמה שעות עבדתי..." / "הדיווחים שלי" → query_hours
 - "כמה לגבות" / "מה פתוח אצל <לקוח>" → query_billing | "סמן ש<לקוח> שילם / הנפיקו חשבונית" → update_billing (אשר עם חגי קודם!)
 - "צור משימה..." / "סגור משימה..." / "המשימות שלי" → manage_tasks
+- "כמה צרכת / כמה אתה עולה לי היום/החודש" → usage_report
 - **הבחנה חשובה:** "תזכיר לי מחר ב-9 ל..." = אירוע ביומן → add_calendar_event. "צור משימה..." = משימה אמיתית → manage_tasks. אל תבלבל ביניהם; אם לא ברור — שאל.
 - שמות לקוחות מותאמים אוטומטית (התאמה חלקית). אם לקוח לא נמצא — הצג את הרשימה ובקש הבהרה.
 
@@ -466,6 +479,9 @@ async function handleTool(name: string, input: Record<string, unknown>): Promise
       return `✅ נשלח ל-${tgt.name}${tgt.type === 'group' ? ' (קבוצה)' : ` (${tgt.number})`}`
     }
 
+    case 'usage_report':
+      return getUsageReport((s('period') || 'today') as 'today' | 'month')
+
     case 'get_email':
       return await getEmailContent(s('email_id'))
 
@@ -512,6 +528,7 @@ export async function shouldRespondInGroup(msg: InboundMessage, history: ChatEnt
 בספק — ענה NO. עדיף לשתוק מאשר להתפרץ לשיחה. ענה במילה אחת: YES או NO.`,
       messages: [{ role: 'user', content: `שיחה אחרונה בקבוצה:\n${convo}\n\n← האם ההודעה האחרונה מכוונת לרגב?` }],
     })
+    recordUsage('haiku', res.usage)
     const out = res.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map(b => b.text).join('').toUpperCase()
     return out.includes('YES')
   } catch (err) {
@@ -562,6 +579,7 @@ export async function runAgent(msg: InboundMessage, history: ChatEntry[] = []): 
     })
 
     console.log(`[usage] in=${res.usage.input_tokens} cache_read=${res.usage.cache_read_input_tokens ?? 0} cache_write=${res.usage.cache_creation_input_tokens ?? 0} out=${res.usage.output_tokens}`)
+    recordUsage('sonnet', res.usage)
 
     messages.push({ role: 'assistant', content: res.content })
 
