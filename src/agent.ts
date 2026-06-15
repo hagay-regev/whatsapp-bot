@@ -246,11 +246,11 @@ const tools: Anthropic.Tool[] = [
   // ── שליחת וואטסאפ לאחרים ──
   {
     name: 'find_contact',
-    description: 'חפש איש קשר בוואטסאפ לפי שם (לפני שליחת הודעה לאדם אחר). מחזיר התאמות עם מספר.',
+    description: 'חפש איש קשר או קבוצה בוואטסאפ לפי שם (לפני שליחת הודעה). מחזיר התאמות (אנשים עם מספר, קבוצות מסומנות).',
     input_schema: {
       type: 'object' as const,
       properties: {
-        query: { type: 'string', description: 'שם איש הקשר לחיפוש' },
+        query: { type: 'string', description: 'שם איש הקשר או הקבוצה לחיפוש' },
       },
       required: ['query'],
     },
@@ -330,8 +330,8 @@ ${buildMemoryPrompt()}
 - **הבחנה חשובה:** "תזכיר לי מחר ב-9 ל..." = אירוע ביומן → add_calendar_event. "צור משימה..." = משימה אמיתית → manage_tasks. אל תבלבל ביניהם; אם לא ברור — שאל.
 - שמות לקוחות מותאמים אוטומטית (התאמה חלקית). אם לקוח לא נמצא — הצג את הרשימה ובקש הבהרה.
 
-# שליחת וואטסאפ לאנשים אחרים
-- "שלח ל<שם> ש..." / "תכתוב ל<שם>..." → **תמיד** קודם find_contact לאיתור המספר.
+# שליחת וואטסאפ לאנשים ולקבוצות
+- "שלח ל<שם> ש..." / "תכתוב בקבוצה <שם>..." → **תמיד** קודם find_contact (מוצא גם אנשים וגם קבוצות).
 - **לעולם אל תמציא או תנחש מספר טלפון.** מותר להציג רק מספר ושם שחזרו בפועל מ-find_contact. אם find_contact החזיר ריק — אסור לומר "נמצא" ואסור להציג מספר.
 - **אם לא נמצא — אל תוותר ואל תגיד "לא מצאתי" מיד.** נסה שוב עם וריאציות: רק שם פרטי, פחות אותיות (תחילית), או איות אחר (עברית/אנגלית, עם/בלי ו'). הצג את האפשרויות הקרובות שמצאת ושאל את חגי "התכוונת ל...?". רק אם באמת אין שום דבר דומה אחרי כמה ניסיונות — אמור שלא מצאת.
 - **לפני שליחה: הצג לחגי את הנמען (שם + מספר מ-find_contact) ואת תוכן ההודעה, ובקש אישור.** דוגמה: "אשלח לדני כהן (0521234567): \"אאחר ב-10 דקות\" — 👍 לאישור".
@@ -459,18 +459,19 @@ async function handleTool(name: string, input: Record<string, unknown>): Promise
     // שליחת וואטסאפ לאחרים
     case 'find_contact': {
       const matches = await findContacts(s('query'))
-      if (!matches.length) return `❌ לא מצאתי איש קשר בשם "${s('query')}".`
-      return matches.map(c => `• ${c.name} — ${c.number}`).join('\n')
+      if (!matches.length) return `❌ לא מצאתי איש קשר או קבוצה בשם "${s('query')}".`
+      return matches.map(c => `• ${c.name}${c.type === 'group' ? ' (קבוצה)' : ` — ${c.number}`}`).join('\n')
     }
 
     case 'send_whatsapp': {
       const matches = await findContacts(s('contact_name'))
       if (matches.length === 0)
-        return `❌ לא מצאתי איש קשר בשם "${s('contact_name')}" — לא שלחתי כלום.`
+        return `❌ לא מצאתי איש קשר או קבוצה בשם "${s('contact_name')}" — לא שלחתי כלום.`
       if (matches.length > 1)
-        return `❌ יש כמה אנשי קשר בשם "${s('contact_name')}":\n${matches.map(c => `• ${c.name} — ${c.number}`).join('\n')}\nתדייק למי, לא שלחתי.`
-      await sendMessage(matches[0].number, s('message'))
-      return `✅ נשלח ל-${matches[0].name} (${matches[0].number})`
+        return `❌ יש כמה תוצאות בשם "${s('contact_name')}":\n${matches.map(c => `• ${c.name}${c.type === 'group' ? ' (קבוצה)' : ` — ${c.number}`}`).join('\n')}\nתדייק, לא שלחתי.`
+      const tgt = matches[0]
+      await sendMessage(tgt.number, s('message'))
+      return `✅ נשלח ל-${tgt.name}${tgt.type === 'group' ? ' (קבוצה)' : ` (${tgt.number})`}`
     }
 
     case 'get_email':

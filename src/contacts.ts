@@ -6,7 +6,7 @@
 
 import { config } from './config'
 
-export interface Contact { name: string; number: string }
+export interface Contact { name: string; number: string; type?: 'contact' | 'group' }
 
 export async function findContacts(query: string): Promise<Contact[]> {
   const gw = config.wahaUrl.replace(/\/+$/, '')
