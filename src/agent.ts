@@ -270,11 +270,11 @@ const tools: Anthropic.Tool[] = [
   },
   {
     name: 'usage_report',
-    description: 'דווח כמה טוקנים/כסף רגב צרך. "כמה צרכת היום/החודש", "כמה אתה עולה לי".',
+    description: 'דווח כמה טוקנים/כסף רגב צרך. "כמה צרכת היום", "גרף שבועי/חודשי", "כמה אתה עולה לי". week/month מחזירים גרף עמודות.',
     input_schema: {
       type: 'object' as const,
       properties: {
-        period: { type: 'string', description: 'today / month' },
+        period: { type: 'string', description: 'today / week / month' },
       },
       required: [],
     },
@@ -318,7 +318,7 @@ const STABLE_SYSTEM = `אתה רגב — הבוט האישי של חגי רגב-
 - "X שעות ל<לקוח>, <תיאור>" → log_hours | "כמה שעות עבדתי..." / "הדיווחים שלי" → query_hours
 - "כמה לגבות" / "מה פתוח אצל <לקוח>" → query_billing | "סמן ש<לקוח> שילם / הנפיקו חשבונית" → update_billing (אשר עם חגי קודם!)
 - "צור משימה..." / "סגור משימה..." / "המשימות שלי" → manage_tasks
-- "כמה צרכת / כמה אתה עולה לי היום/החודש" → usage_report
+- "כמה צרכת / כמה אתה עולה לי" → usage_report (today). "גרף שבועי/חודשי" → usage_report עם week/month
 - **הבחנה חשובה:** "תזכיר לי מחר ב-9 ל..." = אירוע ביומן → add_calendar_event. "צור משימה..." = משימה אמיתית → manage_tasks. אל תבלבל ביניהם; אם לא ברור — שאל.
 - שמות לקוחות מותאמים אוטומטית (התאמה חלקית). אם לקוח לא נמצא — הצג את הרשימה ובקש הבהרה.
 
@@ -480,7 +480,7 @@ async function handleTool(name: string, input: Record<string, unknown>): Promise
     }
 
     case 'usage_report':
-      return getUsageReport((s('period') || 'today') as 'today' | 'month')
+      return getUsageReport((s('period') || 'today') as 'today' | 'week' | 'month')
 
     case 'get_email':
       return await getEmailContent(s('email_id'))
