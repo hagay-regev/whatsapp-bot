@@ -284,35 +284,14 @@ const tools: Anthropic.Tool[] = [
 
 // ── System prompt ─────────────────────────────────────────────────────────────
 
-function buildSystemPrompt(msg: InboundMessage, history: ChatEntry[] = []): string {
-  const today = new Date().toLocaleDateString('he-IL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Jerusalem' })
-  const time  = new Date().toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem' })
-
-  const historySection = msg.isGroup && history.length > 1
-    ? `\n# הודעות אחרונות בקבוצה\n${history.slice(-20).map(h =>
-        `[${h.ts.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem' })}] ${h.sender}: ${h.body}`
-      ).join('\n')}\n`
-    : ''
-
-  const groupLabel = msg.groupName ?? msg.chatId
-
-  return `אתה רגב — הבוט האישי של חגי רגב-וויל.
+const STABLE_SYSTEM = `אתה רגב — הבוט האישי של חגי רגב-וויל.
 אתה חכם, קצר, נעים — עם נגיעה של ציניות וסרקזם קל שגורמת לאנשים לחייך.
 אתה שייך לחגי ועובד בשבילו בלבד.
 
-היום: ${today} | שעה: ${time}
-
-${msg.isGroup
-  ? `📍 אתה בקבוצה: "${groupLabel}". כל מה שאתה אומר גלוי לכולם.
-     אל תחשוף פרטים אישיים על חגי אלא אם הוא הורה במפורש.
-     אם שואלים מי אתה — "רגב. הבוט של חגי. אל תשאל יותר מדי שאלות 😏"
-     אתה רואה את ההיסטוריה של השיחה. פנו אליך — ענה בהתאם להקשר.`
-  : `💬 שיחה פרטית עם ${msg.isFromOwner ? 'חגי (הבעלים)' : msg.senderName}.`}
-
-שולח: ${msg.senderName} | ${msg.isFromOwner ? '✅ זה חגי' : '⚠️ לא חגי'}
-${historySection}
-# זיכרון
-${buildMemoryPrompt()}
+# בקבוצה
+- כל מה שאתה אומר גלוי לכולם. אל תחשוף פרטים אישיים על חגי אלא אם הורה במפורש.
+- אם שואלים מי אתה — "רגב. הבוט של חגי. אל תשאל יותר מדי שאלות 😏"
+- ענה בהתאם להקשר השיחה. אל תציע פעולות שאי אפשר (ניהול קבוצה, בלוק).
 
 # כללים
 - מגיב בעברית, קצר וישיר
@@ -343,6 +322,19 @@ ${buildMemoryPrompt()}
 - **בקבוצה: אל תציע פעולות שאינך יכול לבצע** (הסרת חברים, בלוק, ניהול קבוצה וכו')
 - **הודעה אחת בלבד** — אל תפצל תשובות למספר הודעות
 `
+
+/** Volatile per-message context — goes in the messages, NOT the cached system prefix. */
+function buildContext(msg: InboundMessage, history: ChatEntry[]): string {
+  const today = new Date().toLocaleDateString('he-IL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Jerusalem' })
+  const time  = new Date().toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem' })
+  const where = msg.isGroup ? `📍 קבוצה: "${msg.groupName ?? msg.chatId}"` : '💬 שיחה פרטית'
+  const who   = `שולח: ${msg.senderName} | ${msg.isFromOwner ? '✅ זה חגי' : '⚠️ לא חגי'}`
+  const hist  = msg.isGroup && history.length > 1
+    ? `\n\n# הודעות אחרונות בקבוצה\n${history.slice(-20).map(h =>
+        `[${h.ts.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem' })}] ${h.sender}: ${h.body}`
+      ).join('\n')}`
+    : ''
+  return `[הקשר] היום: ${today} | שעה: ${time}\n${where} | ${who}${hist}`
 }
 
 // ── Tool handler ──────────────────────────────────────────────────────────────
@@ -533,33 +525,43 @@ export async function shouldRespondInGroup(msg: InboundMessage, history: ChatEnt
 
 /** In private chats, replay the conversation as real user/assistant turns so the
  *  model has context for follow-ups ("תסמן שנקרא" right after an email listing). */
-function buildPrivateMessages(msg: InboundMessage, history: ChatEntry[]): Anthropic.MessageParam[] {
+function buildPrivateMessages(msg: InboundMessage, history: ChatEntry[], ctx: string): Anthropic.MessageParam[] {
   const turns: Anthropic.MessageParam[] = history.slice(-20).map(h => ({
     role: h.sender === 'רגב' ? 'assistant' as const : 'user' as const,
     content: h.body,
   }))
-  // First message must be a user turn
   while (turns.length && turns[0].role === 'assistant') turns.shift()
-  // Make sure the current message is the last user turn
   if (!turns.length || turns[turns.length - 1].role !== 'user') {
     turns.push({ role: 'user', content: msg.body })
   }
+  // Prepend the volatile context to the current (last) user turn.
+  const last = turns[turns.length - 1]
+  last.content = `${ctx}\n\n${typeof last.content === 'string' ? last.content : msg.body}`
   return turns
 }
 
 export async function runAgent(msg: InboundMessage, history: ChatEntry[] = []): Promise<string> {
+  const ctx = buildContext(msg, history)
   const messages: Anthropic.MessageParam[] = msg.isGroup
-    ? [{ role: 'user', content: msg.body }]
-    : buildPrivateMessages(msg, history)
+    ? [{ role: 'user', content: `${ctx}\n\n${msg.body}` }]
+    : buildPrivateMessages(msg, history, ctx)
+
+  // Stable prefix (persona + rules + tools) is cached; memory is small & uncached.
+  const system: Anthropic.TextBlockParam[] = [
+    { type: 'text', text: STABLE_SYSTEM, cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: `# זיכרון\n${buildMemoryPrompt()}` },
+  ]
 
   while (true) {
     const res = await client.messages.create({
       model:      'claude-sonnet-4-6',
       max_tokens: 1024,
-      system:     buildSystemPrompt(msg, history),
+      system,
       tools,
       messages,
     })
+
+    console.log(`[usage] in=${res.usage.input_tokens} cache_read=${res.usage.cache_read_input_tokens ?? 0} cache_write=${res.usage.cache_creation_input_tokens ?? 0} out=${res.usage.output_tokens}`)
 
     messages.push({ role: 'assistant', content: res.content })
 
