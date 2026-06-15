@@ -9,6 +9,8 @@ import { buildMemoryPrompt, saveRule, saveFact, savePerson, deleteRule, deleteFa
 import { createEvent, getSchedule, updateEvent, deleteEvent } from './calendar'
 import { searchEmails, getEmailContent, sendEmail, listInbox, markEmailRead, trashEmail } from './gmail'
 import { logHours, queryHours, queryBilling, updateBilling, createTask, updateTask, listTasks } from './billing'
+import { findContacts } from './contacts'
+import { sendMessage } from './whatsapp'
 import type { InboundMessage } from './whatsapp'
 import type { ChatEntry } from './index'
 
@@ -241,6 +243,30 @@ const tools: Anthropic.Tool[] = [
       required: ['op'],
     },
   },
+  // ── שליחת וואטסאפ לאחרים ──
+  {
+    name: 'find_contact',
+    description: 'חפש איש קשר בוואטסאפ לפי שם (לפני שליחת הודעה לאדם אחר). מחזיר התאמות עם מספר.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        query: { type: 'string', description: 'שם איש הקשר לחיפוש' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'send_whatsapp',
+    description: 'שלח הודעת וואטסאפ לאדם אחר. קרא לזה רק *אחרי* שחגי אישר (👍/כן) את הנמען והתוכן. השתמש במספר שהתקבל מ-find_contact.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        phone:   { type: 'string', description: 'מספר הנמען (מ-find_contact)' },
+        message: { type: 'string', description: 'תוכן ההודעה לשליחה' },
+      },
+      required: ['phone', 'message'],
+    },
+  },
   {
     name: 'send_email',
     description: 'שלח מייל. השתמש רק כשמבקשים במפורש לשלוח.',
@@ -303,6 +329,13 @@ ${buildMemoryPrompt()}
 - "צור משימה..." / "סגור משימה..." / "המשימות שלי" → manage_tasks
 - **הבחנה חשובה:** "תזכיר לי מחר ב-9 ל..." = אירוע ביומן → add_calendar_event. "צור משימה..." = משימה אמיתית → manage_tasks. אל תבלבל ביניהם; אם לא ברור — שאל.
 - שמות לקוחות מותאמים אוטומטית (התאמה חלקית). אם לקוח לא נמצא — הצג את הרשימה ובקש הבהרה.
+
+# שליחת וואטסאפ לאנשים אחרים
+- "שלח ל<שם> ש..." / "תכתוב ל<שם>..." → קודם find_contact לאיתור המספר.
+- אם יש כמה התאמות — הצג ובקש לדייק. אם אין — אמור שלא נמצא.
+- **לפני שליחה: הצג לחגי את הנמען (שם + מספר) ואת תוכן ההודעה, ובקש אישור.** דוגמה: "אשלח לדני כהן (0521234567): \"אאחר ב-10 דקות\" — 👍 לאישור".
+- **אל תקרא ל-send_whatsapp עד שחגי מאשר במפורש** — 👍, "כן", או "אשר". רק אז שלח עם המספר שאותר.
+- זו פעולה שיוצאת החוצה לאנשים אחרים — אל תמציא תוכן; שלח בדיוק מה שחגי ביקש.
 - תאריכים יחסיים ("מחר", "ביום שלישי") — חשב לפי התאריך של היום
 - טון: נעים עם קורט ציניות — לא גס, לא יבש
 - **בקבוצה: אל תציע פעולות שאינך יכול לבצע** (הסרת חברים, בלוק, ניהול קבוצה וכו')
@@ -420,6 +453,17 @@ async function handleTool(name: string, input: Record<string, unknown>): Promise
       })
       return await listTasks({ status: s('status') || undefined, client_name: s('client_name') || undefined })
     }
+
+    // שליחת וואטסאפ לאחרים
+    case 'find_contact': {
+      const matches = await findContacts(s('query'))
+      if (!matches.length) return `❌ לא מצאתי איש קשר בשם "${s('query')}".`
+      return matches.map(c => `• ${c.name} — ${c.number}`).join('\n')
+    }
+
+    case 'send_whatsapp':
+      await sendMessage(s('phone'), s('message'))
+      return `✅ נשלח ל-${s('phone')}`
 
     case 'get_email':
       return await getEmailContent(s('email_id'))
