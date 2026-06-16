@@ -632,7 +632,7 @@ export async function runAgent(msg: InboundMessage, history: ChatEntry[] = []): 
   while (true) {
     const res = await client.messages.create({
       model:      'claude-sonnet-4-6',
-      max_tokens: 1024,
+      max_tokens: 4096,  // room for multi-action requests (e.g. adding many calendar events at once)
       system,
       tools:      activeTools,
       messages,
@@ -642,13 +642,6 @@ export async function runAgent(msg: InboundMessage, history: ChatEntry[] = []): 
     recordUsage('sonnet', res.usage)
 
     messages.push({ role: 'assistant', content: res.content })
-
-    if (res.stop_reason === 'end_turn') {
-      return res.content
-        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-        .map(b => b.text)
-        .join('') || '✅'
-    }
 
     if (res.stop_reason === 'tool_use') {
       const results: Anthropic.ToolResultBlockParam[] = []
@@ -666,7 +659,14 @@ export async function runAgent(msg: InboundMessage, history: ChatEntry[] = []): 
       continue
     }
 
-    break
+    // end_turn, max_tokens, or anything else — return whatever text we have.
+    const text = res.content
+      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .map(b => b.text)
+      .join('')
+    if (text) return text
+    if (res.stop_reason === 'max_tokens')
+      return '⚠️ הבקשה גדולה מדי לתשובה אחת — נסה לפצל (למשל כמה תאריכים בכל פעם).'
+    return '✅'
   }
-  return '...'
 }
