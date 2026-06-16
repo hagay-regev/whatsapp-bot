@@ -387,6 +387,7 @@ function buildContext(msg: InboundMessage, history: ChatEntry[]): string {
 async function handleTool(name: string, input: Record<string, unknown>, msg: InboundMessage): Promise<string> {
   const s = (k: string) => String(input[k] ?? '')
   const b = (k: string) => input[k] === true || input[k] === 'true'
+  console.log('[tool]', name, JSON.stringify(input))
 
   switch (name) {
     // אישורים
