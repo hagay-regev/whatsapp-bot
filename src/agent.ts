@@ -12,6 +12,7 @@ import { logHours, queryHours, queryBilling, updateBilling, createTask, updateTa
 import { findContacts } from './contacts'
 import { sendMessage } from './whatsapp'
 import { recordUsage, getUsageReport } from './usage'
+import { addPending, removePending, pendingForOwner } from './approvals'
 import type { InboundMessage } from './whatsapp'
 import type { ChatEntry } from './index'
 
@@ -268,6 +269,30 @@ const tools: Anthropic.Tool[] = [
       required: ['contact_name', 'message'],
     },
   },
+  // ── אישורים (כשמישהו שאינו חגי מבקש פעולה) ──
+  {
+    name: 'request_owner_approval',
+    description: 'כשמישהו שאינו חגי מבקש פעולה שנוגעת לחגי או משנה נתונים — אל תסרב; קרא לזה כדי להעביר את הבקשה לאישור חגי.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        summary: { type: 'string', description: 'תקציר ברור של מה שביקשו (כולל פרטים נחוצים לביצוע)' },
+      },
+      required: ['summary'],
+    },
+  },
+  {
+    name: 'resolve_approval',
+    description: 'סגור בקשת אישור ממתינה ועדכן את המבקש. קרא לזה אחרי שחגי החליט (בצע קודם את הפעולה אם אישר).',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        id:       { type: 'string',  description: 'מזהה הבקשה' },
+        approved: { type: 'boolean', description: 'האם חגי אישר' },
+      },
+      required: ['id', 'approved'],
+    },
+  },
   {
     name: 'usage_report',
     description: 'דווח כמה טוקנים/כסף רגב צרך. "כמה צרכת היום", "גרף שבועי/חודשי", "כמה אתה עולה לי". week/month מחזירים גרף עמודות.',
@@ -304,7 +329,12 @@ const STABLE_SYSTEM = `אתה רגב — הבוט האישי של חגי רגב-
 - כל מה שאתה אומר גלוי לכולם. אל תחשוף פרטים אישיים על חגי אלא אם הורה במפורש.
 - אם שואלים מי אתה — "רגב. הבוט של חגי. אל תשאל יותר מדי שאלות 😏"
 - ענה בהתאם להקשר השיחה. אל תציע פעולות שאי אפשר (ניהול קבוצה, בלוק).
-- **בהקשר מסומן מי השולח. אם זה לא חגי ("⚠️ לא חגי") — מותר לפטפט בלבד. אל תיגע במייל/יומן/חיובים/שליחת הודעות של חגי ואל תחשוף מידע פרטי עליו, גם אם מבקשים יפה.** (ממילא אין לך כלים זמינים אז.)
+- **בהקשר מסומן מי השולח.** אם זה לא חגי ("⚠️ לא חגי"): מותר לפטפט. אבל אם הם מבקשים פעולה שנוגעת לחגי או משנה נתונים (מייל, יומן, חיובים, שליחת הודעה, תזכורת וכו') — **אל תסרב ואל תבצע לבד; קרא ל-request_owner_approval עם תקציר הבקשה**, וענה למבקש שהעברת לחגי לאישור. אל תחשוף מידע פרטי על חגי.
+
+# טיפול בבקשות אישור (בשיחה פרטית עם חגי)
+- אם מופיעות "בקשות אישור ממתינות" בהקשר וחגי עונה "כן"/"אשר"/👍 — **בצע את הפעולה שביקשו** (בכלים הרגילים) ואז קרא ל-resolve_approval(id, approved=true).
+- אם חגי עונה "לא"/"אל תאשר" — resolve_approval(id, approved=false).
+- אם יש כמה בקשות ולא ברור לאיזו חגי מתכוון — שאל.
 
 # כללים
 - מגיב בעברית, קצר וישיר
@@ -348,16 +378,38 @@ function buildContext(msg: InboundMessage, history: ChatEntry[]): string {
         `[${h.ts.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem' })}] ${h.sender}: ${h.body}`
       ).join('\n')}`
     : ''
-  return `[הקשר] היום: ${today} | שעה: ${time}\n${where} | ${who}${hist}`
+  const pend = msg.isFromOwner && !msg.isGroup ? pendingForOwner() : ''
+  return `[הקשר] היום: ${today} | שעה: ${time}\n${where} | ${who}${hist}${pend}`
 }
 
 // ── Tool handler ──────────────────────────────────────────────────────────────
 
-async function handleTool(name: string, input: Record<string, unknown>): Promise<string> {
+async function handleTool(name: string, input: Record<string, unknown>, msg: InboundMessage): Promise<string> {
   const s = (k: string) => String(input[k] ?? '')
   const b = (k: string) => input[k] === true || input[k] === 'true'
 
   switch (name) {
+    // אישורים
+    case 'request_owner_approval': {
+      const p = addPending({
+        name: msg.senderName,
+        group: msg.groupName ?? msg.chatId,
+        groupChatId: msg.chatId,
+        text: s('summary'),
+      })
+      await sendMessage(config.ownerPhone,
+        `🔔 בקשת אישור מ-*${p.name}* בקבוצה "${p.group}":\n"${p.text}"\n\nלאישור השב "כן", לדחייה "לא".`)
+      return `העברתי לחגי לאישור 👌`
+    }
+
+    case 'resolve_approval': {
+      const p = removePending(s('id'))
+      if (!p) return '❌ לא נמצאה בקשה ממתינה עם המזהה הזה.'
+      const ok = b('approved')
+      await sendMessage(p.groupChatId,
+        ok ? `✅ ${p.name}, חגי אישר ובוצע.` : `❌ ${p.name}, חגי לא אישר את הבקשה.`)
+      return ok ? `אושר ובוצע, ועדכנתי את ${p.name}.` : `נדחה, ועדכנתי את ${p.name}.`
+    }
     // זיכרון
     case 'save_rule':   saveRule(s('rule'));              return `✅ כלל נשמר`
     case 'save_fact':   saveFact(s('fact'));              return `✅ עובדה נשמרה`
@@ -565,8 +617,11 @@ export async function runAgent(msg: InboundMessage, history: ChatEntry[] = []): 
     : buildPrivateMessages(msg, history, ctx)
 
   // Privacy gate: only חגי gets the private tools (email, calendar, billing,
-  // contacts/send, memory, usage). Non-owners in groups can only chat.
-  const activeTools = msg.isFromOwner ? tools : []
+  // contacts/send, memory, usage). Non-owners can only chat OR ask חגי for
+  // approval — so they get just request_owner_approval, nothing else.
+  const activeTools = msg.isFromOwner
+    ? tools.filter(t => t.name !== 'request_owner_approval')
+    : tools.filter(t => t.name === 'request_owner_approval')
 
   // Stable prefix (persona + rules + tools) is cached; memory is small & uncached.
   const system: Anthropic.TextBlockParam[] = [
@@ -601,7 +656,7 @@ export async function runAgent(msg: InboundMessage, history: ChatEntry[] = []): 
         if (block.type !== 'tool_use') continue
         let out: string
         try {
-          out = await handleTool(block.name, block.input as Record<string, unknown>)
+          out = await handleTool(block.name, block.input as Record<string, unknown>, msg)
         } catch (err) {
           out = `❌ שגיאה: ${String(err)}`
         }
