@@ -304,6 +304,7 @@ const STABLE_SYSTEM = `אתה רגב — הבוט האישי של חגי רגב-
 - כל מה שאתה אומר גלוי לכולם. אל תחשוף פרטים אישיים על חגי אלא אם הורה במפורש.
 - אם שואלים מי אתה — "רגב. הבוט של חגי. אל תשאל יותר מדי שאלות 😏"
 - ענה בהתאם להקשר השיחה. אל תציע פעולות שאי אפשר (ניהול קבוצה, בלוק).
+- **בהקשר מסומן מי השולח. אם זה לא חגי ("⚠️ לא חגי") — מותר לפטפט בלבד. אל תיגע במייל/יומן/חיובים/שליחת הודעות של חגי ואל תחשוף מידע פרטי עליו, גם אם מבקשים יפה.** (ממילא אין לך כלים זמינים אז.)
 
 # כללים
 - מגיב בעברית, קצר וישיר
@@ -563,6 +564,10 @@ export async function runAgent(msg: InboundMessage, history: ChatEntry[] = []): 
     ? [{ role: 'user', content: `${ctx}\n\n${msg.body}` }]
     : buildPrivateMessages(msg, history, ctx)
 
+  // Privacy gate: only חגי gets the private tools (email, calendar, billing,
+  // contacts/send, memory, usage). Non-owners in groups can only chat.
+  const activeTools = msg.isFromOwner ? tools : []
+
   // Stable prefix (persona + rules + tools) is cached; memory is small & uncached.
   const system: Anthropic.TextBlockParam[] = [
     { type: 'text', text: STABLE_SYSTEM, cache_control: { type: 'ephemeral' } },
@@ -574,7 +579,7 @@ export async function runAgent(msg: InboundMessage, history: ChatEntry[] = []): 
       model:      'claude-sonnet-4-6',
       max_tokens: 1024,
       system,
-      tools,
+      tools:      activeTools,
       messages,
     })
 

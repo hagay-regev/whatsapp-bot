@@ -72,8 +72,11 @@ export function parseGatewayPayload(raw: Record<string, unknown>, ownerPhone: st
     const senderName = String(p.notifyName ?? rawData?.notifyName ?? senderPhone)
 
     const normalizedOwner  = ownerPhone.replace(/\D/g, '')
-    const isFromOwner = senderPhone.endsWith(normalizedOwner.slice(-9)) ||
-                        normalizedOwner.endsWith(senderPhone.slice(-9))
+    const ownerLid = config.ownerLid.replace(/\D/g, '')
+    const isFromOwner =
+      (!!senderPhone && (senderPhone.endsWith(normalizedOwner.slice(-9)) ||
+                         normalizedOwner.endsWith(senderPhone.slice(-9)))) ||
+      (!!ownerLid && senderPhone === ownerLid)
 
     // Check if this message is a reply to a message sent by the bot (fromMe)
     const quotedMsg = p.quotedMsg as Record<string, unknown> | undefined

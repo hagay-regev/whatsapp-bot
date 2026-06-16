@@ -11,6 +11,8 @@ export const config = {
   wahaUrl:         required('WHATSAPP_GW_URL'),
   wahaSession:     process.env.WAHA_SESSION ?? 'default',
   ownerPhone:      required('OWNER_PHONE'),
+  // בקבוצות חגי מגיע דרך מזהה @lid ולא דרך הטלפון — צריך לזהות גם אותו
+  ownerLid:        process.env.OWNER_LID ?? '157925964279827',
   port:            parseInt(process.env.PORT ?? '3001'),
   webhookSecret:   process.env.WEBHOOK_SECRET ?? '',
   supabaseUrl:     process.env.SUPABASE_URL ?? '',
