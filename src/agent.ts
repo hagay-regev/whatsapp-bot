@@ -329,12 +329,15 @@ const STABLE_SYSTEM = `אתה רגב — הבוט האישי של חגי רגב-
 - כל מה שאתה אומר גלוי לכולם. אל תחשוף פרטים אישיים על חגי אלא אם הורה במפורש.
 - אם שואלים מי אתה — "רגב. הבוט של חגי. אל תשאל יותר מדי שאלות 😏"
 - ענה בהתאם להקשר השיחה. אל תציע פעולות שאי אפשר (ניהול קבוצה, בלוק).
-- **בהקשר מסומן מי השולח.** אם זה לא חגי ("⚠️ לא חגי"): מותר לפטפט. אבל אם הם מבקשים פעולה שנוגעת לחגי או משנה נתונים (מייל, יומן, חיובים, שליחת הודעה, תזכורת וכו') — **אל תסרב ואל תבצע לבד; קרא ל-request_owner_approval עם תקציר הבקשה**, וענה למבקש שהעברת לחגי לאישור. אל תחשוף מידע פרטי על חגי.
+- **בהקשר מסומן מי השולח.** אם זה לא חגי ("⚠️ לא חגי") — מותר לפטפט, אבל:
+  - אם מבקשים גישה לנתונים פרטיים *שלהם עצמם* (היומן שלהם, המייל שלהם וכו') — **אין לך גישה לזה; יש לך רק את של חגי. אמור זאת בכנות ובפשטות** ("אין לי גישה ליומן שלך, רק של חגי"). אל תבקש אישור על זה.
+  - אם מבקשים פעולה שנוגעת לחגי/לקבוצה שאתה *כן* יכול לבצע (תזכורת/הודעה/משימה עבור חגי וכו') — אל תבצע לבד; קרא ל-request_owner_approval עם תקציר מלא.
+  - אל תחשוף מידע פרטי על חגי.
 
-# טיפול בבקשות אישור (בשיחה פרטית עם חגי)
-- אם מופיעות "בקשות אישור ממתינות" בהקשר וחגי עונה "כן"/"אשר"/👍 — **בצע את הפעולה שביקשו** (בכלים הרגילים) ואז קרא ל-resolve_approval(id, approved=true).
-- אם חגי עונה "לא"/"אל תאשר" — resolve_approval(id, approved=false).
-- אם יש כמה בקשות ולא ברור לאיזו חגי מתכוון — שאל.
+# בקשות אישור
+- request_owner_approval מחזיר שאלת אישור — **הצג אותה בקבוצה כמו שהיא** (חגי יראה ויחליט שם, ב-👍/👎).
+- בהקשר של חגי מופיעות "בקשות אישור ממתינות". אם חגי מגיב 👍/כן/אשר — **בצע את הפעולה שביקשו** (בכלים) ואז resolve_approval(id, approved=true). אם 👎/לא — resolve_approval(id, approved=false).
+- אם יש כמה בקשות ולא ברור לאיזו — שאל.
 
 # כללים
 - מגיב בעברית, קצר וישיר
@@ -379,7 +382,7 @@ function buildContext(msg: InboundMessage, history: ChatEntry[]): string {
         `[${h.ts.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem' })}] ${h.sender}: ${h.body}`
       ).join('\n')}`
     : ''
-  const pend = msg.isFromOwner && !msg.isGroup ? pendingForOwner() : ''
+  const pend = msg.isFromOwner ? pendingForOwner() : ''
   return `[הקשר] היום: ${today} | שעה: ${time}\n${where} | ${who}${hist}${pend}`
 }
 
@@ -398,18 +401,14 @@ async function handleTool(name: string, input: Record<string, unknown>, msg: Inb
         groupChatId: msg.chatId,
         text: s('summary'),
       })
-      await sendMessage(config.ownerPhone,
-        `🔔 בקשת אישור מ-*${p.name}* בקבוצה "${p.group}":\n"${p.text}"\n\nלאישור השב "כן", לדחייה "לא".`)
-      return `העברתי לחגי לאישור 👌`
+      // Returned text is posted by the model in the group, so חגי decides there.
+      return `🔔 חגי, *${p.name}* ביקש: "${p.text}".\nמאשר? השב 👍 לאישור או 👎 לדחייה.`
     }
 
     case 'resolve_approval': {
       const p = removePending(s('id'))
       if (!p) return '❌ לא נמצאה בקשה ממתינה עם המזהה הזה.'
-      const ok = b('approved')
-      await sendMessage(p.groupChatId,
-        ok ? `✅ ${p.name}, חגי אישר ובוצע.` : `❌ ${p.name}, חגי לא אישר את הבקשה.`)
-      return ok ? `אושר ובוצע, ועדכנתי את ${p.name}.` : `נדחה, ועדכנתי את ${p.name}.`
+      return b('approved') ? `✅ אושר — בוצע.` : `❌ ${p.name}, חגי לא אישר.`
     }
     // זיכרון
     case 'save_rule':   saveRule(s('rule'));              return `✅ כלל נשמר`

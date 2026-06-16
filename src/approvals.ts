@@ -30,6 +30,8 @@ export function addPending(x: Omit<Pending, 'id' | 'ts'>): Pending {
   return p
 }
 
+export function hasPending(): boolean { return load().length > 0 }
+
 export function removePending(id: string): Pending | undefined {
   const a = load()
   const i = a.findIndex(p => p.id === id)
