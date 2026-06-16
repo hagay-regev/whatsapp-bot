@@ -17,9 +17,19 @@ const emptyBucket = (): Bucket => ({ in: 0, cacheRead: 0, cacheWrite: 0, out: 0 
 const emptyDay = (): Day => ({ sonnet: emptyBucket(), haiku: emptyBucket() })
 
 function load(): Store {
-  try { return JSON.parse(fs.readFileSync(USAGE_PATH, 'utf-8')) } catch { return {} }
+  try {
+    const raw = fs.readFileSync(USAGE_PATH, 'utf-8').trim()
+    return raw ? JSON.parse(raw) : {}
+  } catch { return {} }
 }
-function save(s: Store) { fs.writeFile(USAGE_PATH, JSON.stringify(s), () => {}) }
+// Atomic + synchronous: write to a temp file then rename, so concurrent
+// writers never see (or leave) a blank/torn file. Sync keeps each
+// read-modify-write call atomic within the single-threaded bot process.
+function save(s: Store) {
+  const tmp = `${USAGE_PATH}.${process.pid}.tmp`
+  fs.writeFileSync(tmp, JSON.stringify(s))
+  fs.renameSync(tmp, USAGE_PATH)
+}
 
 const ilDay = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date())
 const addDays = (d: string, n: number) => {

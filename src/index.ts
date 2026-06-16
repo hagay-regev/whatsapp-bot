@@ -35,9 +35,14 @@ function loadHistory(): Map<string, ChatEntry[]> {
 const chatHistory = loadHistory()
 
 function persistHistory() {
-  fs.writeFile(HISTORY_PATH, JSON.stringify(Object.fromEntries(chatHistory)), err => {
-    if (err) console.error('[history] persist failed:', err.message)
-  })
+  // Atomic write (temp + rename) so concurrent messages can't corrupt/blank the file.
+  try {
+    const tmp = `${HISTORY_PATH}.${process.pid}.tmp`
+    fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(chatHistory)))
+    fs.renameSync(tmp, HISTORY_PATH)
+  } catch (err) {
+    console.error('[history] persist failed:', (err as Error).message)
+  }
 }
 
 function appendHistory(chatId: string, sender: string, body: string) {
