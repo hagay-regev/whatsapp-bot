@@ -154,6 +154,50 @@ export async function sendEmail(opts: {
   return `✉️ מייל נשלח בהצלחה ל-${opts.to}!`
 }
 
+// ── Find someone's email address by name (from past correspondence) ───────────
+
+export async function findEmailByName(name: string): Promise<string> {
+  const token = await getGmailToken()
+  const norm = (s: string) => s.toLowerCase().replace(/["\s]/g, '')
+  const nq = norm(name)
+  const tokens = name.split(/\s+/).filter(t => t.length > 1)
+  const found = new Map<string, string>() // email -> display name
+
+  for (const op of ['from', 'to']) {
+    const url = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages')
+    url.searchParams.set('q', `${op}:${name}`)
+    url.searchParams.set('maxResults', '10')
+    const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } })
+    if (!res.ok) continue
+    const data = await res.json() as { messages?: Array<{ id: string }> }
+
+    for (const m of (data.messages ?? [])) {
+      const r = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=To`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      if (!r.ok) continue
+      const md = await r.json() as GmailMsg
+      const blob = `${header(md, 'From')}, ${header(md, 'To')}`
+      const re = /([^,<]*)<([^>]+)>/g
+      let mt: RegExpExecArray | null
+      while ((mt = re.exec(blob))) {
+        const disp = mt[1].trim().replace(/^"|"$/g, '')
+        const email = mt[2].trim().toLowerCase()
+        const nd = norm(disp)
+        if (!nd) continue
+        // keep only addresses whose display name matches the searched person
+        if (nd.includes(nq) || nq.includes(nd) || tokens.some(t => nd.includes(norm(t)))) {
+          found.set(email, disp || name)
+        }
+      }
+    }
+  }
+
+  if (!found.size) return `❌ לא מצאתי כתובת מייל ל"${name}" בהתכתבויות שלך.`
+  return Array.from(found).map(([email, disp]) => `• ${disp}: ${email}`).join('\n')
+}
+
 // ── Mark as read / trash ──────────────────────────────────────────────────────
 
 const SCOPE_HINT = 'אין לי הרשאה לשנות מיילים — חגי צריך להריץ מחדש את get-token.js ולעדכן את GOOGLE_REFRESH_TOKEN'

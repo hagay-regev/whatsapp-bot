@@ -7,7 +7,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { config } from './config'
 import { buildMemoryPrompt, saveRule, saveFact, savePerson, deleteRule, deleteFact } from './memory'
 import { createEvent, getSchedule, updateEvent, deleteEvent } from './calendar'
-import { searchEmails, getEmailContent, sendEmail, listInbox, markEmailRead, trashEmail } from './gmail'
+import { searchEmails, getEmailContent, sendEmail, listInbox, markEmailRead, trashEmail, findEmailByName } from './gmail'
 import { logHours, queryHours, queryBilling, updateBilling, createTask, updateTask, listTasks } from './billing'
 import { findContacts } from './contacts'
 import { sendMessage } from './whatsapp'
@@ -279,6 +279,15 @@ const tools: Anthropic.Tool[] = [
   },
   // ── שליחת וואטסאפ לאחרים ──
   {
+    name: 'find_email',
+    description: 'מצא כתובת מייל של אדם לפי שם, מתוך ההתכתבויות ב-Gmail. השתמש להזמנת אנשים לאירוע יומן (attendees) — לפני שאתה אומר שאין מייל.',
+    input_schema: {
+      type: 'object' as const,
+      properties: { name: { type: 'string', description: 'שם האדם' } },
+      required: ['name'],
+    },
+  },
+  {
     name: 'find_contact',
     description: 'חפש איש קשר או קבוצה בוואטסאפ לפי שם (לפני שליחת הודעה). מחזיר התאמות (אנשים עם מספר, קבוצות מסומנות).',
     input_schema: {
@@ -376,6 +385,7 @@ const STABLE_SYSTEM = `אתה רגב — הבוט האישי של חגי רגב-
 - "זכור ש..." / הנחיות → save_rule או save_fact
 - כשמספרים על אדם → save_person
 - בקשות יומן → add_calendar_event / get_schedule / update_calendar_event / delete_calendar_event
+- **הזמנת אנשים לאירוע (attendees) לפי שם** → קודם find_email לאיתור המייל, ואז add_calendar_event עם המיילים. רק אם find_email לא מצא — שאל את חגי לכתובת.
 - בקשות מייל → list_inbox / search_emails / get_email / send_email / mark_email_read / delete_email
 - "תראה מיילים", "מה יש במייל" → list_inbox | חיפוש → search_emails | "שלח מייל" → send_email
 - "תסמן שנקרא" / "תמחק את המייל" → אם הזכרת מייל קודם בשיחה השתמש ב-ID שלו; אחרת חפש קודם
@@ -576,6 +586,9 @@ async function handleTool(name: string, input: Record<string, unknown>, msg: Inb
 
     case 'usage_report':
       return getUsageReport((s('period') || 'today') as 'today' | 'week' | 'month')
+
+    case 'find_email':
+      return await findEmailByName(s('name'))
 
     case 'get_email':
       return await getEmailContent(s('email_id'))
