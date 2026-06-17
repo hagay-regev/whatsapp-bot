@@ -109,9 +109,11 @@ export async function getSchedule(opts: {
 }): Promise<string> {
   const token   = await getAccessToken()
   const today   = new Date().toISOString().slice(0, 10)
-  const date    = opts.date ?? today
-  const dateEnd = opts.date_end ?? date
   const search  = opts.search?.toLowerCase() ?? ''
+  const shift = (ymd: string, n: number) => { const d = new Date(ymd + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10) }
+  // Name search without an explicit date → scan a wide window (6 months back → ~13 months ahead).
+  const date    = opts.date ?? (search ? shift(today, -180) : today)
+  const dateEnd = opts.date_end ?? (opts.date ? opts.date : (search ? shift(today, 400) : today))
 
   const personal = process.env.GOOGLE_CALENDAR_PERSONAL ?? 'primary'
   const family   = process.env.GOOGLE_CALENDAR_FAMILY   ?? personal
@@ -136,7 +138,7 @@ export async function getSchedule(opts: {
     url.searchParams.set('timeMax', timeMax)
     url.searchParams.set('singleEvents', 'true')
     url.searchParams.set('orderBy', 'startTime')
-    url.searchParams.set('maxResults', '20')
+    url.searchParams.set('maxResults', search ? '100' : '20')
     if (search) url.searchParams.set('q', search)
 
     const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } })
@@ -150,6 +152,7 @@ export async function getSchedule(opts: {
     : all
 
   if (filtered.length === 0) {
+    if (search) return `📅 לא מצאתי אירועים עם "${opts.search}" ביומן.`
     const label = date === today ? 'היום' : date.slice(5).replace('-', '/')
     return `📅 אין אירועים ${label}.`
   }
@@ -158,9 +161,13 @@ export async function getSchedule(opts: {
     const dt = e.start?.dateTime
     const d  = e.start?.date
     const time = dt ? dt.split('T')[1]?.slice(0, 5) : 'כל היום'
-    const dateStr = (dt ?? d ?? '').slice(5, 10).replace('-', '/')
+    const ds = (dt ?? d ?? '').slice(0, 10)
+    // include the year on name-searches (results may span years); otherwise just DD/MM
+    const dateStr = search ? `${ds.slice(8)}/${ds.slice(5, 7)}/${ds.slice(0, 4)}` : ds.slice(5).replace('-', '/')
     return `• ${dateStr} ${time} — ${e.summary ?? '(ללא שם)'}`
   })
+
+  if (search) return `📅 ${filtered.length} אירועים עם "${opts.search}":\n${lines.join('\n')}`
 
   const label = date === dateEnd
     ? (date === today ? 'היום' : date.slice(5).replace('-', '/'))
