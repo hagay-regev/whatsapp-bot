@@ -19,6 +19,8 @@ const SCOPES        = [
   'https://www.googleapis.com/auth/calendar',
   // modify = קריאה + סימון נקרא/לא-נקרא + אשפה + שליחה (לא מחיקה לצמיתות)
   'https://www.googleapis.com/auth/gmail.modify',
+  // אנשי קשר (קריאה בלבד) — לחיפוש מייל/טלפון לפי שם
+  'https://www.googleapis.com/auth/contacts.readonly',
 ].join(' ')
 
 const authUrl = `https://accounts.google.com/o/oauth2/auth?` +

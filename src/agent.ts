@@ -10,6 +10,7 @@ import { createEvent, getSchedule, updateEvent, deleteEvent } from './calendar'
 import { searchEmails, getEmailContent, sendEmail, listInbox, markEmailRead, trashEmail, findEmailByName } from './gmail'
 import { logHours, queryHours, queryBilling, updateBilling, createTask, updateTask, listTasks } from './billing'
 import { findContacts } from './contacts'
+import { lookupGoogleContact } from './google-contacts'
 import { sendMessage } from './whatsapp'
 import { recordUsage, getUsageReport } from './usage'
 import { addPending, removePending, pendingForOwner } from './approvals'
@@ -279,8 +280,17 @@ const tools: Anthropic.Tool[] = [
   },
   // ── שליחת וואטסאפ לאחרים ──
   {
+    name: 'lookup_contact',
+    description: 'מצא פרטי איש קשר (מייל + טלפון) לפי שם, מאנשי הקשר השמורים של Google. השתמש לכל שאלה על פרטי קשר של מישהו ולהזמנות יומן. אם לא נמצא — אפשר ליפול חזרה ל-find_email.',
+    input_schema: {
+      type: 'object' as const,
+      properties: { name: { type: 'string', description: 'שם איש הקשר' } },
+      required: ['name'],
+    },
+  },
+  {
     name: 'find_email',
-    description: 'מצא כתובת מייל של אדם לפי שם, מתוך ההתכתבויות ב-Gmail. השתמש להזמנת אנשים לאירוע יומן (attendees) — לפני שאתה אומר שאין מייל.',
+    description: 'מצא כתובת מייל של אדם מתוך ההתכתבויות ב-Gmail. גיבוי ל-lookup_contact כשאיש הקשר לא שמור אבל התכתבת איתו.',
     input_schema: {
       type: 'object' as const,
       properties: { name: { type: 'string', description: 'שם האדם' } },
@@ -385,7 +395,8 @@ const STABLE_SYSTEM = `אתה רגב — הבוט האישי של חגי רגב-
 - "זכור ש..." / הנחיות → save_rule או save_fact
 - כשמספרים על אדם → save_person
 - בקשות יומן → add_calendar_event / get_schedule / update_calendar_event / delete_calendar_event
-- **הזמנת אנשים לאירוע (attendees) לפי שם** → קודם find_email לאיתור המייל, ואז add_calendar_event עם המיילים. רק אם find_email לא מצא — שאל את חגי לכתובת.
+- **פרטי איש קשר (מייל/טלפון) של מישהו** → lookup_contact (אנשי הקשר של Google).
+- **הזמנת אנשים לאירוע (attendees) לפי שם** → קודם lookup_contact לאיתור המייל; אם לא נמצא — find_email (Gmail); ורק אם גם זה ריק — שאל את חגי. ואז add_calendar_event עם המיילים.
 - בקשות מייל → list_inbox / search_emails / get_email / send_email / mark_email_read / delete_email
 - "תראה מיילים", "מה יש במייל" → list_inbox | חיפוש → search_emails | "שלח מייל" → send_email
 - "תסמן שנקרא" / "תמחק את המייל" → אם הזכרת מייל קודם בשיחה השתמש ב-ID שלו; אחרת חפש קודם
@@ -586,6 +597,9 @@ async function handleTool(name: string, input: Record<string, unknown>, msg: Inb
 
     case 'usage_report':
       return getUsageReport((s('period') || 'today') as 'today' | 'week' | 'month')
+
+    case 'lookup_contact':
+      return await lookupGoogleContact(s('name'))
 
     case 'find_email':
       return await findEmailByName(s('name'))
