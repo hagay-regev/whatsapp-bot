@@ -132,6 +132,12 @@ export async function getSchedule(opts: {
   type GEvent = { summary?: string; start?: { dateTime?: string; date?: string }; end?: { dateTime?: string; date?: string } }
   const all: Array<GEvent & { calId: string }> = []
 
+  // Forgiving name match: search Google by the most distinctive word, then
+  // filter ignoring spaces/dashes — so "אביה חופשה" matches "אביה - חופשה".
+  const sTokens = search.split(/\s+/).filter(t => t && t !== '-')
+  const qToken  = [...sTokens].sort((a, b) => b.length - a.length)[0] ?? search
+  const norm    = (s: string) => s.toLowerCase().replace(/[\s\-]/g, '')
+
   for (const calId of calIds) {
     const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`)
     url.searchParams.set('timeMin', timeMin)
@@ -139,7 +145,7 @@ export async function getSchedule(opts: {
     url.searchParams.set('singleEvents', 'true')
     url.searchParams.set('orderBy', 'startTime')
     url.searchParams.set('maxResults', search ? '100' : '20')
-    if (search) url.searchParams.set('q', search)
+    if (search) url.searchParams.set('q', qToken)
 
     const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } })
     if (!res.ok) continue
@@ -148,7 +154,7 @@ export async function getSchedule(opts: {
   }
 
   const filtered = search
-    ? all.filter(e => (e.summary ?? '').toLowerCase().includes(search))
+    ? all.filter(e => norm(e.summary ?? '').includes(norm(search)))
     : all
 
   if (filtered.length === 0) {
