@@ -216,14 +216,15 @@ const tools: Anthropic.Tool[] = [
   },
   {
     name: 'query_hours',
-    description: 'סיכום או רשימת שעות עבודה. לשאלה על יום/טווח ספציפי ("ביום שישי האחרון", "ב-12/6", "בין ה-1 ל-7") — חשב את התאריכים לפי היום והעבר date_from/date_to. ל"היום/השבוע/החודש" אפשר period.',
+    description: 'סיכום או רשימת שעות עבודה. **לשאלה על לקוח ספציפי** ("הדיווח האחרון בפאראגון", "כמה עבדתי לכפרית") — העבר client_name (יחפש בכל הלקוח, לא מוגבל ל-10 האחרונים). לשאלה על יום/טווח — date_from/date_to. ל"היום/השבוע/החודש" — period.',
     input_schema: {
       type: 'object' as const,
       properties: {
-        date_from: { type: 'string', description: 'תאריך התחלה YYYY-MM-DD (ליום בודד שים אותו תאריך גם ב-date_to)' },
-        date_to:   { type: 'string', description: 'תאריך סיום YYYY-MM-DD' },
-        period:    { type: 'string', description: 'today / week / month (חלופה ל-date_from כשהשאלה כללית)' },
-        list:      { type: 'boolean', description: 'true = רשימת דיווחים מפורטת, false = סיכום' },
+        client_name: { type: 'string', description: 'סינון לפי לקוח (לדיווחי לקוח מסוים)' },
+        date_from:   { type: 'string', description: 'תאריך התחלה YYYY-MM-DD' },
+        date_to:     { type: 'string', description: 'תאריך סיום YYYY-MM-DD' },
+        period:      { type: 'string', description: 'today / week / month' },
+        list:        { type: 'boolean', description: 'true = רשימת דיווחים מפורטת, false = סיכום' },
       },
       required: [],
     },
@@ -381,6 +382,7 @@ const STABLE_SYSTEM = `אתה רגב — הבוט האישי של חגי רגב-
 
 # תשלומים, שעות ומשימות (אפליקציית התשלומים)
 - "X שעות ל<לקוח>, <תיאור>" → log_hours | "כמה שעות עבדתי..." / "הדיווחים שלי" → query_hours
+- **שאלה על דיווחים של לקוח ספציפי** ("הדיווח האחרון בפאראגון", "מתי עבדתי לכפרית") → query_hours עם client_name (list=true). אל תסתמך על רשימת ה-10 האחרונים — תמיד סנן לפי הלקוח.
 - "כמה לגבות" / "מה פתוח אצל <לקוח>" → query_billing | "סמן ש<לקוח> שילם / הנפיקו חשבונית" → update_billing (אשר עם חגי קודם!)
 - "צור משימה..." / "סגור משימה..." / "המשימות שלי" → manage_tasks
 - "כמה צרכת / כמה אתה עולה לי" → usage_report (today). מסור את המספרים כפי שהם — אל תסכם ל"אפס/חינמי" גם אם קטן.
@@ -515,10 +517,11 @@ async function handleTool(name: string, input: Record<string, unknown>, msg: Inb
 
     case 'query_hours':
       return await queryHours({
-        date_from: s('date_from') || undefined,
-        date_to:   s('date_to') || undefined,
-        period:    (s('period') || undefined) as 'today' | 'week' | 'month' | undefined,
-        list:      b('list'),
+        client_name: s('client_name') || undefined,
+        date_from:   s('date_from') || undefined,
+        date_to:     s('date_to') || undefined,
+        period:      (s('period') || undefined) as 'today' | 'week' | 'month' | undefined,
+        list:        b('list'),
       })
 
     case 'query_billing':

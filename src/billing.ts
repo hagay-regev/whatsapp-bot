@@ -116,11 +116,20 @@ export async function logHours(opts: {
 }
 
 export async function queryHours(opts: {
-  period?: 'today' | 'week' | 'month'; date_from?: string; date_to?: string; list?: boolean
+  period?: 'today' | 'week' | 'month'; date_from?: string; date_to?: string; list?: boolean; client_name?: string
 } = {}): Promise<string> {
   const uid = await ownerId()
   const today = ilToday()
   const list = opts.list ?? false
+
+  // Resolve client filter (so "last entries for <client>" works regardless of how
+  // deep they are in the monthly list).
+  let clientId: string | undefined
+  if (opts.client_name) {
+    const m = matchClient(await getClients(), opts.client_name)
+    if (!m) return `❌ לא מצאתי לקוח בשם "${opts.client_name}".`
+    clientId = m.id
+  }
 
   // Explicit date range (model-driven) takes priority over period presets.
   let from: string, to: string, label: string
@@ -128,36 +137,45 @@ export async function queryHours(opts: {
     from = opts.date_from
     to = opts.date_to ?? opts.date_from
     label = from === to ? from : `${from} עד ${to}`
-  } else {
-    const period = opts.period ?? 'today'
+  } else if (opts.period) {
     to = today
     // Work week is Sunday–Saturday (Israeli week).
-    if (period === 'week') from = addDays(today, -ilDow(today))
-    else if (period === 'month') from = today.slice(0, 7) + '-01'
+    if (opts.period === 'week') from = addDays(today, -ilDow(today))
+    else if (opts.period === 'month') from = today.slice(0, 7) + '-01'
     else from = today
-    label = ({ today: 'היום', week: 'השבוע', month: 'החודש' } as Record<string, string>)[period]
+    label = ({ today: 'היום', week: 'השבוע', month: 'החודש' } as Record<string, string>)[opts.period]
+  } else if (clientId) {
+    // Client given without a period — search wide (12 months) to find their entries.
+    from = addDays(today, -365); to = today; label = '12 חודשים אחרונים'
+  } else {
+    from = today; to = today; label = 'היום'
   }
+
+  const clientLabel = opts.client_name ? ` — ${opts.client_name}` : ''
 
   if (list) {
-    const { data } = await db.from('time_entries')
+    let q = db.from('time_entries')
       .select('date, work_hours, description, clients(name)')
       .eq('user_id', uid).gte('date', from).lte('date', to)
-      .order('date', { ascending: false }).limit(10)
+    if (clientId) q = q.eq('client_id', clientId)
+    const { data } = await q.order('date', { ascending: false }).limit(clientId ? 20 : 10)
     const rows = (data ?? []) as Array<{ date: string; work_hours: number; description: string; clients?: { name?: string } | null }>
-    if (!rows.length) return `📋 אין דיווחים (${label}).`
-    return `📋 דיווחים (${label}):\n${rows.map(r => `• ${r.date.slice(5)} | ${r.clients?.name ?? '—'} | ${Number(r.work_hours).toFixed(1)}h${r.description ? ` — ${r.description.slice(0, 30)}` : ''}`).join('\n')}`
+    if (!rows.length) return `📋 אין דיווחים (${label}${clientLabel}).`
+    return `📋 דיווחים (${label}${clientLabel}):\n${rows.map(r => `• ${r.date.slice(5)} | ${r.clients?.name ?? '—'} | ${Number(r.work_hours).toFixed(1)}h${r.description ? ` — ${r.description.slice(0, 30)}` : ''}`).join('\n')}`
   }
 
-  const { data } = await db.from('time_entries')
+  let sq = db.from('time_entries')
     .select('work_hours, travel_hours, clients(name)')
     .eq('user_id', uid).gte('date', from).lte('date', to)
+  if (clientId) sq = sq.eq('client_id', clientId)
+  const { data } = await sq
   const rows = (data ?? []) as Array<{ work_hours: number; travel_hours: number; clients?: { name?: string } | null }>
   const work = rows.reduce((s, r) => s + Number(r.work_hours ?? 0), 0)
   const travel = rows.reduce((s, r) => s + Number(r.travel_hours ?? 0), 0)
   const byClient = new Map<string, number>()
   for (const r of rows) byClient.set(r.clients?.name ?? '—', (byClient.get(r.clients?.name ?? '—') ?? 0) + Number(r.work_hours ?? 0))
   const top = Array.from(byClient.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([n, h]) => `  • ${n}: ${h.toFixed(1)}h`).join('\n')
-  return `📊 סיכום שעות — ${label}\n⏱ עבודה: ${work.toFixed(1)}h${travel > 0 ? `\n🚗 נסיעות: ${travel.toFixed(1)}h` : ''}\n📋 ${rows.length} דיווחים${top ? `\n\nלפי לקוח:\n${top}` : ''}`
+  return `📊 סיכום שעות — ${label}${clientLabel}\n⏱ עבודה: ${work.toFixed(1)}h${travel > 0 ? `\n🚗 נסיעות: ${travel.toFixed(1)}h` : ''}\n📋 ${rows.length} דיווחים${top ? `\n\nלפי לקוח:\n${top}` : ''}`
 }
 
 // ── Billing ───────────────────────────────────────────────────────────────────
