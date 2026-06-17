@@ -161,7 +161,8 @@ export async function queryHours(opts: {
     const { data } = await q.order('date', { ascending: false }).limit(clientId ? 20 : 10)
     const rows = (data ?? []) as Array<{ date: string; work_hours: number; description: string; clients?: { name?: string } | null }>
     if (!rows.length) return `📋 אין דיווחים (${label}${clientLabel}).`
-    return `📋 דיווחים (${label}${clientLabel}):\n${rows.map(r => `• ${r.date.slice(5)} | ${r.clients?.name ?? '—'} | ${Number(r.work_hours).toFixed(1)}h${r.description ? ` — ${r.description.slice(0, 30)}` : ''}`).join('\n')}`
+    const d = (s: string) => `${s.slice(8)}/${s.slice(5, 7)}/${s.slice(0, 4)}`  // DD/MM/YYYY — full + unambiguous
+    return `📋 דיווחים (${label}${clientLabel}) — מהחדש לישן:\n${rows.map(r => `• ${d(r.date)} | ${r.clients?.name ?? '—'} | ${Number(r.work_hours).toFixed(1)}h${r.description ? ` — ${r.description.slice(0, 30)}` : ''}`).join('\n')}`
   }
 
   let sq = db.from('time_entries')
