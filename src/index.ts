@@ -14,7 +14,6 @@ import { config } from './config'
 import { parseGatewayPayload, sendMessage } from './whatsapp'
 import { runAgent, shouldRespondInGroup } from './agent'
 import { transcribeVoice } from './voice'
-import { hasPending } from './approvals'
 
 const app = express()
 app.use(express.json())
@@ -170,9 +169,10 @@ app.post('/webhook', async (req, res) => {
   if (msg.isGroup) {
     appendHistory(historyKey, msg.senderName, msg.body)
     const explicit = /רגב|regev/i.test(msg.body)
-    // חגי מגיב לבקשת אישור (👍/👎/כן/לא) — תמיד תופסים, גם אם השער היה מהסס
-    const ownerConfirm = msg.isFromOwner && hasPending() &&
-      /^\s*(👍|👎|כן|לא|אשר|בטל|מאשר|דחה)/.test(msg.body.trim())
+    // חגי מגיב באישור/דחייה קצרים (👍/👎/כן/לא) — תמיד תופסים, גם אם השער היה מהסס
+    // (אישור בקשה, אישור יצירת אירועים וכו'). חגי כמעט אף פעם לא שולח 👍 סתם.
+    const ownerConfirm = msg.isFromOwner &&
+      /^\s*(👍|👎|כן|לא|אשר|בטל|מאשר|דחה|אוקיי|אישור)\s*$/.test(msg.body.trim())
     if (!explicit && !ownerConfirm && !(await shouldRespondInGroup(msg, getHistory(historyKey)))) return
   } else {
     // Private chats get history too, so follow-ups like "תסמן שנקרא" keep context

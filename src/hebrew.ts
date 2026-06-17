@@ -44,19 +44,27 @@ async function toGregorian(parasha: string | undefined, day: number | undefined,
   return null
 }
 
+// Remember the last previewed set so an approval ("👍") can create it without the
+// model having to re-list all events.
+let lastPreview: { cal: string; rows: Array<{ title: string; start: string | null; end: string | null }> } | null = null
+
 export async function hebrewEvents(opts: { calendarName?: string; create: boolean; events: HebEvent[] }): Promise<string> {
-  const cal = opts.calendarName ?? 'משפחתי'
-  const resolved = await Promise.all(opts.events.map(async ev => ({
+  const cal = opts.calendarName ?? lastPreview?.cal ?? 'משפחתי'
+  let resolved = await Promise.all(opts.events.map(async ev => ({
     title: ev.title,
     start: await toGregorian(ev.parasha, ev.day, ev.month, ev.year),
     end: ev.end_day && ev.end_month ? await toGregorian(undefined, ev.end_day, ev.end_month, ev.end_year ?? ev.year) : null,
   })))
+
+  // On create with no fresh events, fall back to the previewed set.
+  if (opts.create && !resolved.some(r => r.start) && lastPreview) resolved = lastPreview.rows
 
   const lines = resolved.map(r => r.start
     ? `• ${r.title} — ${heDate(r.start)}${r.end ? ` עד ${heDate(r.end)}` : ''}`
     : `⚠️ ${r.title} — לא הצלחתי לחשב תאריך`)
 
   if (!opts.create) {
+    lastPreview = { cal, rows: resolved.filter(r => r.start) }
     const ok = resolved.filter(r => r.start).length
     return `📋 לאישור (${ok} תאריכים) ליומן ${cal}:\n${lines.join('\n')}\n\nלהוסיף את כולם? 👍 לאישור`
   }
@@ -79,5 +87,6 @@ export async function hebrewEvents(opts: { calendarName?: string; create: boolea
     )
     if (res.ok) added++
   }
+  lastPreview = null  // consumed
   return `✅ נוספו ${added}/${resolved.length} אירועים ליומן ${cal}.`
 }
