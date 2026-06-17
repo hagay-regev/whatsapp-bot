@@ -262,20 +262,27 @@ export async function renameEvents(opts: { find: string; replace: string; calend
   const now     = new Date()
   const timeMin = new Date(now.getTime() - 180 * 86400000).toISOString()
   const timeMax = new Date(now.getTime() + 400 * 86400000).toISOString()
-  const findLc  = opts.find.toLowerCase()
+
+  // Forgiving match: tokens of `find` separated by any spaces/dashes — so
+  // "אביה חופשה" matches "אביה - חופשה" and replaces it cleanly.
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const tokens = opts.find.trim().split(/\s+/).filter(t => t && t !== '-')
+  const re = new RegExp(tokens.map(esc).join('[\\s\\-]*'), 'gi')
+  const qTerm = [...tokens].sort((a, b) => b.length - a.length)[0] ?? opts.find
 
   let updated = 0
   for (const calId of calIds) {
     const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`)
     url.searchParams.set('timeMin', timeMin); url.searchParams.set('timeMax', timeMax)
-    url.searchParams.set('singleEvents', 'true'); url.searchParams.set('q', opts.find); url.searchParams.set('maxResults', '100')
+    url.searchParams.set('singleEvents', 'true'); url.searchParams.set('q', qTerm); url.searchParams.set('maxResults', '100')
     const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } })
     if (!res.ok) continue
     const data = await res.json() as { items?: Array<{ id: string; summary?: string }> }
     for (const e of data.items ?? []) {
       const title = e.summary ?? ''
-      if (!title.toLowerCase().includes(findLc)) continue
-      const newTitle = title.split(opts.find).join(opts.replace)
+      if (!re.test(title)) continue
+      re.lastIndex = 0
+      const newTitle = title.replace(re, opts.replace)
       if (newTitle === title) continue
       const p = await fetch(
         `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events/${e.id}`,
