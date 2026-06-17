@@ -13,6 +13,7 @@ import { findContacts } from './contacts'
 import { sendMessage } from './whatsapp'
 import { recordUsage, getUsageReport } from './usage'
 import { addPending, removePending, pendingForOwner } from './approvals'
+import { hebrewEvents, type HebEvent } from './hebrew'
 import type { InboundMessage } from './whatsapp'
 import type { ChatEntry } from './index'
 
@@ -64,6 +65,36 @@ const tools: Anthropic.Tool[] = [
         attendees:    { type: 'array', items: { type: 'string' }, description: 'כתובות מייל של משתתפים' },
       },
       required: ['title', 'datetime'],
+    },
+  },
+  {
+    name: 'hebrew_events',
+    description: 'הוסף אירועים לפי תאריכים עבריים או פרשות (לוח עברי מדויק). לפרשה: parasha באנגלית (Noach, Vayera, Ki Tisa, Shlach...). לתאריך עברי: day + month (Elul/Tishrei/Cheshvan/Kislev/Tevet/Shvat/Adar/Nisan/Iyyar/Sivan/Tamuz/Av) + year (שנה עברית, למשל 5787). לטווח (חופשה): הוסף end_day + end_month. **קרא קודם עם create=false להצגת רשימה לאישור, ורק אחרי אישור create=true.**',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        create:       { type: 'boolean', description: 'false = הצג רשימה לאישור; true = הוסף בפועל' },
+        calendarName: { type: 'string',  description: 'אישי / משפחתי / עבודה (ברירת מחדל: משפחתי)' },
+        events: {
+          type: 'array',
+          description: 'רשימת האירועים',
+          items: {
+            type: 'object' as const,
+            properties: {
+              title:     { type: 'string',  description: 'שם האירוע' },
+              parasha:   { type: 'string',  description: 'שם הפרשה באנגלית (לשבתות לפי פרשה)' },
+              day:       { type: 'number',  description: 'יום בחודש העברי (לתאריך עברי)' },
+              month:     { type: 'string',  description: 'חודש עברי באנגלית' },
+              year:      { type: 'number',  description: 'שנה עברית, למשל 5787' },
+              end_day:   { type: 'number',  description: 'יום סיום (לטווח)' },
+              end_month: { type: 'string',  description: 'חודש סיום (לטווח)' },
+              end_year:  { type: 'number',  description: 'שנת סיום (לטווח, אם שונה)' },
+            },
+            required: ['title', 'year'],
+          },
+        },
+      },
+      required: ['create', 'events'],
     },
   },
   {
@@ -355,6 +386,7 @@ const STABLE_SYSTEM = `אתה רגב — הבוט האישי של חגי רגב-
 - "כמה צרכת / כמה אתה עולה לי" → usage_report (today). מסור את המספרים כפי שהם — אל תסכם ל"אפס/חינמי" גם אם קטן.
 - "גרף שבועי/חודשי" → usage_report עם week/month, ו**הדבק את הפלט כמו שהוא, כולל גרף העמודות (השורות עם █ ו-░)**. אל תתאר אותו במילים ואל תמחק את הגרף.
 - **הבחנה חשובה:** "תזכיר לי מחר ב-9 ל..." = אירוע ביומן → add_calendar_event. "צור משימה..." = משימה אמיתית → manage_tasks. אל תבלבל ביניהם; אם לא ברור — שאל.
+- **תאריכים עבריים / פרשות** (שבתות לפי פרשה, "כ"ט אלול", טווחי חופשה בעברית) → hebrew_events (לוח עברי מדויק), *לא* add_calendar_event. תרגם פרשות לאנגלית, קבע שנה עברית נכונה (אלול = השנה שלפני ר"ה; מתשרי ואילך = השנה הבאה). קרא קודם create=false להצגת רשימה, ואחרי 👍 — create=true עם אותם אירועים.
 - שמות לקוחות מותאמים אוטומטית (התאמה חלקית). אם לקוח לא נמצא — הצג את הרשימה ובקש הבהרה.
 
 # שליחת וואטסאפ לאנשים ולקבוצות
@@ -427,6 +459,13 @@ async function handleTool(name: string, input: Record<string, unknown>, msg: Inb
         description:  s('description') || undefined,
         calendarName: s('calendarName') || undefined,
         attendees:    (input.attendees as string[]) || undefined,
+      })
+
+    case 'hebrew_events':
+      return await hebrewEvents({
+        calendarName: s('calendarName') || undefined,
+        create:       b('create'),
+        events:       (input.events as HebEvent[]) ?? [],
       })
 
     case 'get_schedule':
