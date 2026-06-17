@@ -246,6 +246,49 @@ export async function updateEvent(params: {
   return `✅ "${found.summary}" עודכן!`
 }
 
+// ── Bulk rename (text replace in titles) ──────────────────────────────────────
+
+export async function renameEvents(opts: { find: string; replace: string; calendarName?: string }): Promise<string> {
+  const token    = await getAccessToken()
+  const personal = process.env.GOOGLE_CALENDAR_PERSONAL ?? 'primary'
+  const family   = process.env.GOOGLE_CALENDAR_FAMILY   ?? personal
+  const work     = process.env.GOOGLE_CALENDAR_WORK     ?? personal
+  const cn = (opts.calendarName ?? '').toLowerCase()
+  const calIds = cn.includes('משפח') || cn.includes('family') ? [family]
+    : cn.includes('עבוד') || cn.includes('work') ? [work]
+    : cn.includes('אישי') || cn.includes('personal') ? [personal]
+    : Array.from(new Set([personal, family, work]))
+
+  const now     = new Date()
+  const timeMin = new Date(now.getTime() - 180 * 86400000).toISOString()
+  const timeMax = new Date(now.getTime() + 400 * 86400000).toISOString()
+  const findLc  = opts.find.toLowerCase()
+
+  let updated = 0
+  for (const calId of calIds) {
+    const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`)
+    url.searchParams.set('timeMin', timeMin); url.searchParams.set('timeMax', timeMax)
+    url.searchParams.set('singleEvents', 'true'); url.searchParams.set('q', opts.find); url.searchParams.set('maxResults', '100')
+    const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } })
+    if (!res.ok) continue
+    const data = await res.json() as { items?: Array<{ id: string; summary?: string }> }
+    for (const e of data.items ?? []) {
+      const title = e.summary ?? ''
+      if (!title.toLowerCase().includes(findLc)) continue
+      const newTitle = title.split(opts.find).join(opts.replace)
+      if (newTitle === title) continue
+      const p = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events/${e.id}`,
+        { method: 'PATCH', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ summary: newTitle }) },
+      )
+      if (p.ok) updated++
+    }
+  }
+
+  if (updated === 0) return `❌ לא מצאתי אירועים שמכילים "${opts.find}".`
+  return `✅ עודכנו ${updated} אירועים: "${opts.find}" → "${opts.replace}".`
+}
+
 // ── Delete event ──────────────────────────────────────────────────────────────
 
 export async function deleteEvent(search: string): Promise<string> {

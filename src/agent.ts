@@ -6,7 +6,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { config } from './config'
 import { buildMemoryPrompt, saveRule, saveFact, savePerson, deleteRule, deleteFact } from './memory'
-import { createEvent, getSchedule, updateEvent, deleteEvent } from './calendar'
+import { createEvent, getSchedule, updateEvent, deleteEvent, renameEvents } from './calendar'
 import { searchEmails, getEmailContent, sendEmail, listInbox, markEmailRead, trashEmail, findEmailByName } from './gmail'
 import { logHours, queryHours, queryBilling, updateBilling, createTask, updateTask, listTasks } from './billing'
 import { findContacts } from './contacts'
@@ -126,6 +126,19 @@ const tools: Anthropic.Tool[] = [
         all_day:          { type: 'boolean', description: 'המר לאירוע כל היום' },
       },
       required: ['search'],
+    },
+  },
+  {
+    name: 'rename_events',
+    description: 'שנה שם של אירועים מרובים ביומן בבת אחת — החלפת טקסט בכותרת (שומר את השאר). למשל find="אביה - שבת " replace="אביה - שבת מכינה - ". משנה את כל האירועים שמכילים את find. לאירוע בודד השתמש ב-update_calendar_event.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        find:         { type: 'string', description: 'הטקסט הקיים בכותרת להחלפה' },
+        replace:      { type: 'string', description: 'הטקסט החדש' },
+        calendarName: { type: 'string', description: 'אישי / משפחתי / עבודה (אופציונלי)' },
+      },
+      required: ['find', 'replace'],
     },
   },
   {
@@ -397,6 +410,7 @@ const STABLE_SYSTEM = `אתה רגב — הבוט האישי של חגי רגב-
 - בקשות יומן → add_calendar_event / get_schedule / update_calendar_event / delete_calendar_event
 - **פרטי איש קשר (מייל/טלפון) של מישהו** → lookup_contact (אנשי הקשר של Google).
 - **הזמנת אנשים לאירוע (attendees) לפי שם** → קודם lookup_contact לאיתור המייל; אם לא נמצא — find_email (Gmail); ורק אם גם זה ריק — שאל את חגי. ואז add_calendar_event עם המיילים.
+- **שינוי שם של כמה אירועים יחד** (למשל הוספת מילה לכל "אביה - שבת") → rename_events (החלפת טקסט). update_calendar_event הוא לאירוע *בודד* בלבד — אל תשתמש בו ל-14 אירועים.
 - בקשות מייל → list_inbox / search_emails / get_email / send_email / mark_email_read / delete_email
 - "תראה מיילים", "מה יש במייל" → list_inbox | חיפוש → search_emails | "שלח מייל" → send_email
 - "תסמן שנקרא" / "תמחק את המייל" → אם הזכרת מייל קודם בשיחה השתמש ב-ID שלו; אחרת חפש קודם
@@ -508,6 +522,9 @@ async function handleTool(name: string, input: Record<string, unknown>, msg: Inb
         new_calendar:     s('new_calendar') || undefined,
         all_day:          b('all_day'),
       })
+
+    case 'rename_events':
+      return await renameEvents({ find: s('find'), replace: s('replace'), calendarName: s('calendarName') || undefined })
 
     case 'delete_calendar_event':
       return await deleteEvent(s('search'))
