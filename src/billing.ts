@@ -89,30 +89,73 @@ const TYPE_LABEL: Record<string, string> = {
   order_implementation: 'יישום מהזמנה',
 }
 
+interface WorkOrder { id: string; order_number: number; title?: string; description?: string; status?: string; estimated_hours?: number; actual_hours?: number }
+
+async function findWorkOrder(clientId: string, order: string): Promise<{ wo?: WorkOrder; all: WorkOrder[] }> {
+  const { data } = await db.from('work_orders')
+    .select('id, order_number, title, description, status, estimated_hours, actual_hours')
+    .eq('client_id', clientId).order('order_number', { ascending: false })
+  const all = (data ?? []) as WorkOrder[]
+  const o = order.trim().replace(/^#/, '')
+  const num = Number(o)
+  let wo = !isNaN(num) && o !== '' ? all.find(w => w.order_number === num) : undefined
+  if (!wo) { const on = o.toLowerCase(); wo = all.find(w => (w.title ?? '').toLowerCase().includes(on) || (w.description ?? '').toLowerCase().includes(on)) }
+  return { wo, all }
+}
+
+const woLabel = (w: WorkOrder) => `#${w.order_number}${w.title || w.description ? ` ${w.title || w.description}` : ''}`
+
 export async function logHours(opts: {
-  client_name: string; hours: number; type?: string; description?: string; date?: string; start_time?: string
+  client_name: string; hours: number; type?: string; description?: string; date?: string; start_time?: string; order?: string
 }): Promise<string> {
   if (!opts.hours || opts.hours <= 0) return '❌ כמה שעות?'
   const clients = await getClients()
   const matched = matchClient(clients, opts.client_name)
   if (!matched) return `❌ לא מצאתי לקוח בשם "${opts.client_name}". לקוחות:\n${clients.slice(0, 10).map(c => `• ${c.name}`).join('\n')}`
 
+  // Optional: associate the entry with a specific work order (הזמנה).
+  let workOrderId: string | null = null
+  let orderLine = ''
+  if (opts.order) {
+    const { wo, all } = await findWorkOrder(matched.id, opts.order)
+    if (!wo) return `❌ לא מצאתי הזמנה "${opts.order}" אצל ${matched.name}.\nהזמנות זמינות:\n${all.length ? all.map(woLabel).map(s => `• ${s}`).join('\n') : 'אין הזמנות ללקוח זה.'}`
+    workOrderId = wo.id
+    orderLine = `\n📦 ${woLabel(wo)}`
+  }
+
   const uid = await ownerId()
   const date = opts.date ?? ilToday()
-  const type = opts.type ?? 'maintenance'
+  // entries tied to an order are order-implementation by default
+  const type = opts.type ?? (workOrderId ? 'order_implementation' : 'maintenance')
   const fmt = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}:00`
   const startMin = (opts.start_time ? Number(opts.start_time.split(':')[0]) || 8 : 8) * 60
   const endMin = startMin + Math.round(opts.hours * 60)
 
   const { error } = await db.from('time_entries').insert({
-    date, client_id: matched.id, user_id: uid,
+    date, client_id: matched.id, user_id: uid, work_order_id: workOrderId,
     start_time: fmt(startMin), end_time: fmt(endMin),
     travel_hours: 0, type, description: opts.description ?? '',
     is_billable: type !== 'maintenance', notes: 'נוצר דרך רגב',
   })
   if (error) return `❌ שגיאה בשמירה: ${error.message}`
 
-  return `✅ דיווח נשמר!\n🏢 ${matched.name}\n🕐 ${opts.hours}h — ${TYPE_LABEL[type] ?? type}\n📅 ${date}${opts.description ? `\n📝 ${opts.description}` : ''}`
+  return `✅ דיווח נשמר!\n🏢 ${matched.name}\n🕐 ${opts.hours}h — ${TYPE_LABEL[type] ?? type}\n📅 ${date}${orderLine}${opts.description ? `\n📝 ${opts.description}` : ''}`
+}
+
+const WO_STATUS: Record<string, string> = { open: 'פתוחה', in_progress: 'בעבודה', completed: 'הושלמה', cancelled: 'בוטלה', on_hold: 'בהמתנה' }
+
+export async function listOrders(client_name: string): Promise<string> {
+  const matched = matchClient(await getClients(), client_name)
+  if (!matched) return `❌ לא מצאתי לקוח בשם "${client_name}".`
+  const { data } = await db.from('work_orders')
+    .select('order_number, title, description, status, estimated_hours, actual_hours')
+    .eq('client_id', matched.id).order('order_number', { ascending: false }).limit(25)
+  const rows = (data ?? []) as WorkOrder[]
+  if (!rows.length) return `📦 אין הזמנות ל${matched.name}.`
+  return `📦 הזמנות — ${matched.name}:\n${rows.map(o => {
+    const hrs = o.estimated_hours ? ` · ${o.actual_hours ?? 0}/${o.estimated_hours}ש'` : ''
+    return `• #${o.order_number} ${o.title || o.description || ''} (${WO_STATUS[o.status ?? ''] ?? o.status ?? ''})${hrs}`
+  }).join('\n')}`
 }
 
 export async function queryHours(opts: {

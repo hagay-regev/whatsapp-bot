@@ -8,7 +8,7 @@ import { config } from './config'
 import { buildMemoryPrompt, saveRule, saveFact, savePerson, deleteRule, deleteFact } from './memory'
 import { createEvent, getSchedule, updateEvent, deleteEvent, renameEvents } from './calendar'
 import { searchEmails, getEmailContent, sendEmail, listInbox, markEmailRead, trashEmail, findEmailByName } from './gmail'
-import { logHours, queryHours, queryBilling, updateBilling, createTask, updateTask, listTasks } from './billing'
+import { logHours, queryHours, queryBilling, updateBilling, createTask, updateTask, listTasks, listOrders } from './billing'
 import { findContacts } from './contacts'
 import { lookupGoogleContact } from './google-contacts'
 import { sendMessage } from './whatsapp'
@@ -214,18 +214,28 @@ const tools: Anthropic.Tool[] = [
   // ── תשלומים / שעות / משימות (מסד הנתונים של אפליקציית התשלומים) ──
   {
     name: 'log_hours',
-    description: 'דווח שעות עבודה ללקוח. השתמש כש: "3 שעות לכפרית, אינסטלציה", "שעה לרגב בתשלום".',
+    description: 'דווח שעות עבודה ללקוח. השתמש כש: "3 שעות לכפרית, אינסטלציה", "שעה לרגב בתשלום". אם מציינים הזמנה ("על הזמנה 8", "על השדרוג") — העבר order לשיוך הדיווח להזמנה.',
     input_schema: {
       type: 'object' as const,
       properties: {
         client_name: { type: 'string', description: 'שם הלקוח' },
         hours:       { type: 'number', description: 'מספר שעות' },
+        order:       { type: 'string', description: 'הזמנה לשיוך — מספר הזמנה (למשל "8") או מילה מהתיאור (למשל "שדרוג")' },
         type:        { type: 'string', description: 'maintenance (תחזוקה) / paid_implementation (בתשלום) / order_implementation (מהזמנה)' },
         description: { type: 'string', description: 'תיאור העבודה' },
         date:        { type: 'string', description: 'YYYY-MM-DD (ברירת מחדל: היום)' },
         start_time:  { type: 'string', description: 'שעת התחלה HH:MM (אופציונלי)' },
       },
       required: ['client_name', 'hours'],
+    },
+  },
+  {
+    name: 'list_orders',
+    description: 'הצג את ההזמנות (work orders) של לקוח — מספר, תיאור, סטטוס. "מה ההזמנות של פאראגון", או לפני שיוך דיווח להזמנה.',
+    input_schema: {
+      type: 'object' as const,
+      properties: { client_name: { type: 'string', description: 'שם הלקוח' } },
+      required: ['client_name'],
     },
   },
   {
@@ -418,6 +428,7 @@ const STABLE_SYSTEM = `אתה רגב — הבוט האישי של חגי רגב-
 
 # תשלומים, שעות ומשימות (אפליקציית התשלומים)
 - "X שעות ל<לקוח>, <תיאור>" → log_hours | "כמה שעות עבדתי..." / "הדיווחים שלי" → query_hours
+- **שיוך דיווח להזמנה:** אם מציינים הזמנה ("3 שעות לפאראגון על הזמנה 8" / "על השדרוג") → log_hours עם order. "מה ההזמנות של <לקוח>" → list_orders. אם ההזמנה לא נמצאה — הצג את ההזמנות הקיימות ובקש לדייק.
 - **שאלה על דיווחים של לקוח ספציפי** ("הדיווח האחרון בפאראגון", "מתי עבדתי לכפרית") → query_hours עם client_name (list=true). אל תסתמך על רשימת ה-10 האחרונים — תמיד סנן לפי הלקוח.
 - "כמה לגבות" / "מה פתוח אצל <לקוח>" → query_billing | "סמן ש<לקוח> שילם / הנפיקו חשבונית" → update_billing (אשר עם חגי קודם!)
 - "צור משימה..." / "סגור משימה..." / "המשימות שלי" → manage_tasks
@@ -548,11 +559,15 @@ async function handleTool(name: string, input: Record<string, unknown>, msg: Inb
       return await logHours({
         client_name: s('client_name'),
         hours:       Number(input.hours),
+        order:       s('order') || undefined,
         type:        s('type') || undefined,
         description: s('description') || undefined,
         date:        s('date') || undefined,
         start_time:  s('start_time') || undefined,
       })
+
+    case 'list_orders':
+      return await listOrders(s('client_name'))
 
     case 'query_hours':
       return await queryHours({
