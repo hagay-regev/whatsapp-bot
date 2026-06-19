@@ -6,6 +6,36 @@
 
 import { config } from './config'
 
+export async function describeImage(payload: Record<string, unknown>): Promise<string> {
+  if (!config.geminiKey) throw new Error('GEMINI_API_KEY חסר')
+  const md = payload.mediaData as { data?: string; mimetype?: string } | undefined
+  if (!md?.data) throw new Error('אין תמונה')
+  const mimeType = (md.mimetype ?? 'image/jpeg').split(';')[0].trim()
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${config.geminiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType, data: md.data } },
+            { text: 'תאר את התמונה בקצרה, וחלץ כל טקסט ופרטים חשובים שמופיעים בה (תאריכים, שעות, מספרים, שמות, יעדים, סכומים). החזר טקסט בלבד.' },
+          ],
+        }],
+        generationConfig: { maxOutputTokens: 600, temperature: 0 },
+      }),
+    },
+  )
+  const data = await res.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }
+  if (!res.ok) throw new Error(`Gemini: ${JSON.stringify(data).slice(0, 150)}`)
+  const out = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? ''
+  if (!out) throw new Error('תיאור ריק')
+  return out
+}
+
 export async function transcribeVoice(payload: Record<string, unknown>): Promise<string> {
   if (!config.geminiKey) throw new Error('GEMINI_API_KEY חסר')
 

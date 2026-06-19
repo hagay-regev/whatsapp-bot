@@ -13,7 +13,7 @@ import path from 'path'
 import { config } from './config'
 import { parseGatewayPayload, sendMessage } from './whatsapp'
 import { runAgent, shouldRespondInGroup } from './agent'
-import { transcribeVoice } from './voice'
+import { transcribeVoice, describeImage } from './voice'
 
 const app = express()
 app.use(express.json())
@@ -119,6 +119,18 @@ app.post('/webhook', async (req, res) => {
       console.log(`[voice] transcribed: ${String(rawP.body).slice(0, 80)}`)
     } catch (err) {
       console.error('[voice] failed:', (err as Error).message)
+    }
+  }
+
+  // Images (private chats only — gateway attaches mediaData there): "read" via Gemini.
+  if (rawP.type === 'image' && rawP.mediaData) {
+    try {
+      const desc = await describeImage(rawP)
+      const caption = String(rawP.body ?? '').trim()
+      rawP.body = caption ? `${caption}\n[תוכן התמונה: ${desc}]` : `[תמונה] ${desc}`
+      console.log(`[image] described: ${desc.slice(0, 80)}`)
+    } catch (err) {
+      console.error('[image] failed:', (err as Error).message)
     }
   }
 
