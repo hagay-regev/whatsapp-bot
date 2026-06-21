@@ -39,6 +39,29 @@ export function resolveCalendarId(name?: string): string {
   return personal
 }
 
+// ── Reminder (Google Task) ────────────────────────────────────────────────────
+// A "תזכורת" with no specific time → a real Google Task (shows in Calendar with
+// a ☑️). Google's Tasks API only stores a date (it discards time-of-day), so this
+// is used only for the no-time case; timed reminders go through createEvent.
+export async function createReminderTask(opts: {
+  title: string; date: string; description?: string
+}): Promise<string> {
+  const token = await getAccessToken()
+  const res = await fetch('https://www.googleapis.com/tasks/v1/lists/@default/tasks', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      title: `${opts.title} ${BOT_MARK}`,
+      notes: opts.description ?? 'נוצר דרך רגב',
+      due:   `${opts.date}T00:00:00.000Z`,   // date only — time is ignored by the API
+    }),
+  })
+  const data = await res.json() as { error?: unknown }
+  if (!res.ok) throw new Error(JSON.stringify(data.error).slice(0, 200))
+  const dateStr = opts.date.slice(5).replace('-', '/')
+  return `🔔 תזכורת נוספה (Google Tasks):\n*${opts.title}*\n${dateStr} ☑️`
+}
+
 // ── Create event ──────────────────────────────────────────────────────────────
 
 export async function createEvent(opts: {
@@ -54,6 +77,12 @@ export async function createEvent(opts: {
   const { title, datetime, end_datetime, all_day, reminder, description, calendarName, attendees } = opts
   const [datePart, timePart] = datetime.split('T')
   if (!datePart) return `❌ פורמט תאריך לא תקין: ${datetime}`
+
+  // תזכורת ללא שעה → Google Task אמיתי (☑️). עם שעה → אירוע "פנוי" + התראה (למטה).
+  const hasTime = !all_day && !!timePart && timePart.slice(0, 5) !== '00:00'
+  if (reminder && !hasTime) {
+    return await createReminderTask({ title, date: datePart, description })
+  }
 
   const token      = await getAccessToken()
   const calendarId = resolveCalendarId(calendarName)

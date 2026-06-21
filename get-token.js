@@ -21,6 +21,8 @@ const SCOPES        = [
   'https://www.googleapis.com/auth/gmail.modify',
   // אנשי קשר (קריאה בלבד) — לחיפוש מייל/טלפון לפי שם
   'https://www.googleapis.com/auth/contacts.readonly',
+  // Google Tasks — תזכורות אמיתיות (☑️) ללא שעה
+  'https://www.googleapis.com/auth/tasks',
 ].join(' ')
 
 const authUrl = `https://accounts.google.com/o/oauth2/auth?` +
