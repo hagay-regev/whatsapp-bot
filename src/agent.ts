@@ -61,6 +61,7 @@ const tools: Anthropic.Tool[] = [
         datetime:     { type: 'string',  description: 'תאריך ושעה בפורמט YYYY-MM-DDTHH:MM:00' },
         end_datetime: { type: 'string',  description: 'שעת סיום (אופציונלי) YYYY-MM-DDTHH:MM:00' },
         all_day:      { type: 'boolean', description: 'אירוע כל היום?' },
+        reminder:     { type: 'boolean', description: 'תזכורת (לא אירוע)? true כשמבקשים "תזכורת"/"תזכיר לי" — נכנס ליומן כ"פנוי" (לא חוסם זמן) עם התראה בזמן עצמו, ולא חוסם את היום כמו אירוע.' },
         description:  { type: 'string',  description: 'תיאור (אופציונלי)' },
         calendarName: { type: 'string',  description: 'אישי / משפחתי / עבודה' },
         attendees:    { type: 'array', items: { type: 'string' }, description: 'כתובות מייל של משתתפים' },
@@ -124,6 +125,7 @@ const tools: Anthropic.Tool[] = [
         new_end_datetime: { type: 'string', description: 'שעת סיום חדשה' },
         new_calendar:     { type: 'string', description: 'יומן יעד: אישי / משפחתי / עבודה' },
         all_day:          { type: 'boolean', description: 'המר לאירוע כל היום' },
+        reminder:         { type: 'boolean', description: 'המר לתזכורת (true) או חזרה לאירוע רגיל (false) — בלי לשנות שם/שעה' },
       },
       required: ['search'],
     },
@@ -435,7 +437,8 @@ const STABLE_SYSTEM = `אתה רגב — הבוט האישי של חגי רגב-
 - "צור משימה..." / "סגור משימה..." / "המשימות שלי" → manage_tasks
 - "כמה צרכת / כמה אתה עולה לי" → usage_report (today). מסור את המספרים כפי שהם — אל תסכם ל"אפס/חינמי" גם אם קטן.
 - "גרף שבועי/חודשי" → usage_report עם week/month, ו**הדבק את הפלט כמו שהוא, כולל גרף העמודות (השורות עם █ ו-░)**. אל תתאר אותו במילים ואל תמחק את הגרף.
-- **הבחנה חשובה:** "תזכיר לי מחר ב-9 ל..." = אירוע ביומן → add_calendar_event. "צור משימה..." = משימה אמיתית → manage_tasks. אל תבלבל ביניהם; אם לא ברור — שאל.
+- **הבחנה חשובה:** "תזכיר לי מחר ב-9 ל..." / "תכניס תזכורת ביומן" = תזכורת ביומן → add_calendar_event עם **reminder=true** (לא חוסם זמן, התראה בזמן). "קבע פגישה/אירוע" = אירוע → add_calendar_event (בלי reminder). "צור משימה..." = משימה אמיתית → manage_tasks. אל תבלבל ביניהם; אם לא ברור — שאל.
+- אם המשתמש אומר "עשית אירוע, רציתי תזכורת" (או להפך) — **אל תיצור שוב מאפס**. עדכן את הקיים: update_calendar_event עם reminder=true/false (בלי לשנות שם/שעה).
 - **תאריכים עבריים / פרשות** (שבתות לפי פרשה, "כ"ט אלול", טווחי חופשה בעברית) → hebrew_events (לוח עברי מדויק), *לא* add_calendar_event. תרגם פרשות לאנגלית, קבע שנה עברית נכונה (אלול = השנה שלפני ר"ה; מתשרי ואילך = השנה הבאה). קרא קודם create=false להצגת רשימה, ואחרי אישור (👍/כן) — קרא hebrew_events(create=true). אפשר בלי לחזור על כל הרשימה — המערכת זוכרת את התצוגה האחרונה ותיצור אותה.
 - שמות לקוחות מותאמים אוטומטית (התאמה חלקית). אם לקוח לא נמצא — הצג את הרשימה ובקש הבהרה.
 
@@ -506,6 +509,7 @@ async function handleTool(name: string, input: Record<string, unknown>, msg: Inb
         datetime:     s('datetime'),
         end_datetime: s('end_datetime') || undefined,
         all_day:      b('all_day'),
+        reminder:     b('reminder'),
         description:  s('description') || undefined,
         calendarName: s('calendarName') || undefined,
         attendees:    (input.attendees as string[]) || undefined,
@@ -534,6 +538,7 @@ async function handleTool(name: string, input: Record<string, unknown>, msg: Inb
         new_end_datetime: s('new_end_datetime') || undefined,
         new_calendar:     s('new_calendar') || undefined,
         all_day:          b('all_day'),
+        reminder:         input['reminder'] === undefined ? undefined : b('reminder'),
       })
 
     case 'rename_events':

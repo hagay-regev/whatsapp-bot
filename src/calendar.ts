@@ -46,11 +46,12 @@ export async function createEvent(opts: {
   datetime: string          // YYYY-MM-DDTHH:MM:00
   end_datetime?: string
   all_day?: boolean
+  reminder?: boolean        // תזכורת: marked "free" (doesn't block the day) + popup alert
   description?: string
   calendarName?: string
   attendees?: string[]
 }): Promise<string> {
-  const { title, datetime, end_datetime, all_day, description, calendarName, attendees } = opts
+  const { title, datetime, end_datetime, all_day, reminder, description, calendarName, attendees } = opts
   const [datePart, timePart] = datetime.split('T')
   if (!datePart) return `❌ פורמט תאריך לא תקין: ${datetime}`
 
@@ -82,7 +83,10 @@ export async function createEvent(opts: {
     summary:     `${title} ${BOT_MARK}`,
     description: description ?? 'נוצר דרך רגב',
     start, end,
-    reminders: { useDefault: false, overrides: all_day ? [] : [{ method: 'popup', minutes: 30 }] },
+    // A תזכורת is "free" (doesn't show as busy) and pops at the time itself;
+    // a regular event blocks time and reminds 30m before.
+    transparency: reminder ? 'transparent' : 'opaque',
+    reminders: { useDefault: false, overrides: reminder ? [{ method: 'popup', minutes: 0 }] : all_day ? [] : [{ method: 'popup', minutes: 30 }] },
   }
   if (attendees?.length) event.attendees = attendees.map(email => ({ email }))
 
@@ -96,7 +100,9 @@ export async function createEvent(opts: {
   const dateStr  = datePart.slice(5).replace('-', '/')
   const timeStr  = timePart ? timePart.slice(0, 5) : 'כל היום'
   const calLabel = calendarName ? ` (${calendarName})` : ''
-  return `📅 נוסף ביומן${calLabel}:\n*${title}*\n${dateStr} ⏰ ${timeStr}`
+  return reminder
+    ? `🔔 תזכורת נוספה ביומן${calLabel}:\n*${title}*\n${dateStr} ⏰ ${timeStr}`
+    : `📅 נוסף ביומן${calLabel}:\n*${title}*\n${dateStr} ⏰ ${timeStr}`
 }
 
 // ── Get schedule ──────────────────────────────────────────────────────────────
@@ -191,6 +197,7 @@ export async function updateEvent(params: {
   new_end_datetime?: string
   new_calendar?: string
   all_day?: boolean
+  reminder?: boolean        // convert existing entry to/from a תזכורת (free + at-time popup)
 }): Promise<string> {
   const token    = await getAccessToken()
   const personal = process.env.GOOGLE_CALENDAR_PERSONAL ?? 'primary'
@@ -240,6 +247,10 @@ export async function updateEvent(params: {
       ? (params.new_end_datetime.includes('T') ? params.new_end_datetime : `${origDate}T${params.new_end_datetime.slice(0,5)}:00`)
       : (() => { const [d,t] = startStr.split('T'); const [h,m] = (t??'').split(':').map(Number); const e = h*60+m+60; return `${d}T${String(Math.floor(e/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}:00` })()
     patch.end = { dateTime: endStr, timeZone: 'Asia/Jerusalem' }
+  }
+  if (params.reminder !== undefined) {
+    patch.transparency = params.reminder ? 'transparent' : 'opaque'
+    patch.reminders = { useDefault: false, overrides: [{ method: 'popup', minutes: params.reminder ? 0 : 30 }] }
   }
 
   if (Object.keys(patch).length === 0) return '❌ לא הבנתי מה לשנות.'

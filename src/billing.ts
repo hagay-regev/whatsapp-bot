@@ -226,20 +226,41 @@ export async function queryHours(opts: {
 
 export async function queryBilling(opts: { client_name?: string; status?: 'unpaid' | 'paid' | 'all' }): Promise<string> {
   const status = opts.status ?? 'unpaid'
-  let q = db.from('billing_entries').select('id, total_with_vat, expected_payment_date, is_paid, invoice_created, clients(name)')
-  if (status === 'unpaid') q = q.eq('is_paid', false).eq('invoice_created', true)
-  else if (status === 'paid') q = q.eq('is_paid', true)
 
+  let matched: Client | undefined
   if (opts.client_name) {
-    const matched = matchClient(await getClients(), opts.client_name)
+    matched = matchClient(await getClients(), opts.client_name)
     if (!matched) return `❌ לא מצאתי לקוח בשם "${opts.client_name}".`
-    q = q.eq('client_id', matched.id)
   }
 
-  const { data, error } = await q.order('expected_payment_date', { ascending: true }).limit(20)
-  if (error) return `❌ שגיאה: ${error.message}`
-  const rows = (data ?? []) as Array<{ total_with_vat: number; expected_payment_date: string | null; clients: { name?: string } | null }>
-  if (!rows.length) return `✅ אין חשבוניות פתוחות${opts.client_name ? ' ל' + opts.client_name : ''}.`
+  const fetchRows = async (st: 'unpaid' | 'paid' | 'all') => {
+    let q = db.from('billing_entries').select('id, total_with_vat, expected_payment_date, is_paid, invoice_created, period, clients(name)')
+    if (st === 'unpaid') q = q.eq('is_paid', false).eq('invoice_created', true)
+    else if (st === 'paid') q = q.eq('is_paid', true)
+    if (matched) q = q.eq('client_id', matched.id)
+    const { data, error } = await q.order('expected_payment_date', { ascending: true }).limit(20)
+    if (error) throw new Error(error.message)
+    return (data ?? []) as Array<{ total_with_vat: number; expected_payment_date: string | null; period?: string; is_paid?: boolean; clients: { name?: string } | null }>
+  }
+
+  let rows: Awaited<ReturnType<typeof fetchRows>>
+  try { rows = await fetchRows(status) } catch (e) { return `❌ שגיאה: ${(e as Error).message}` }
+
+  if (!rows.length) {
+    // For a specific client an "is there anything?" question shouldn't stop at
+    // "no open invoices" — surface their closed/paid charges so we don't wrongly
+    // claim the client has nothing when they actually have a paid charge.
+    if (matched && status === 'unpaid') {
+      let all: typeof rows
+      try { all = await fetchRows('all') } catch { all = [] }
+      if (all.length) {
+        const lines = all.map(r => `• ${r.period ?? ''} — ₪${Math.round(r.total_with_vat).toLocaleString()} ${r.is_paid ? '✅ שולם' : '⏳ פתוח'}`)
+        return `אין חשבוניות *פתוחות* ל${matched.name}, אבל יש חיובים:\n\n${lines.join('\n')}`
+      }
+      return `✅ אין חיובים בכלל ל${matched.name}.`
+    }
+    return `✅ אין חשבוניות פתוחות${opts.client_name ? ' ל' + opts.client_name : ''}.`
+  }
 
   const total = rows.reduce((s, r) => s + (r.total_with_vat ?? 0), 0)
   const lines = rows.map(r => `• ${r.clients?.name ?? ''} — ₪${Math.round(r.total_with_vat).toLocaleString()}${r.expected_payment_date ? ` (עד ${r.expected_payment_date.slice(0, 10)})` : ''}`)
