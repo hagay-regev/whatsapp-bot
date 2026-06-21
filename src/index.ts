@@ -16,7 +16,10 @@ import { runAgent, shouldRespondInGroup } from './agent'
 import { transcribeVoice, describeImage } from './voice'
 
 const app = express()
-app.use(express.json())
+// Images arrive base64-encoded inside the JSON payload (a photo is ~150KB+),
+// which blows past body-parser's 100KB default and gets rejected with
+// PayloadTooLargeError before the handler runs. Raise the limit generously.
+app.use(express.json({ limit: '25mb' }))
 
 // ── Conversation history (per chat, persisted to disk) ────────────────────────
 export interface ChatEntry { sender: string; body: string; ts: Date }
