@@ -251,6 +251,7 @@ const tools: Anthropic.Tool[] = [
         date_to:     { type: 'string', description: 'תאריך סיום YYYY-MM-DD' },
         period:      { type: 'string', description: 'today / week / month' },
         list:        { type: 'boolean', description: 'true = רשימת דיווחים מפורטת, false = סיכום' },
+        unhandled:   { type: 'boolean', description: 'true = רק דיווחים שעוד *לא טופלו* (לא נסגרו במחזור החודשי). למשל "דיווחים שלא טופלו", "מה עוד לא חויב/נסגר". מציג רשימה מפורטת בטווח רחב.' },
       },
       required: [],
     },
@@ -433,7 +434,8 @@ const STABLE_SYSTEM = `אתה רגב — הבוט האישי של חגי רגב-
 - "X שעות ל<לקוח>, <תיאור>" → log_hours | "כמה שעות עבדתי..." / "הדיווחים שלי" → query_hours
 - **שיוך דיווח להזמנה:** אם מציינים הזמנה ("3 שעות לפאראגון על הזמנה 8" / "על השדרוג") → log_hours עם order. "מה ההזמנות של <לקוח>" → list_orders. אם ההזמנה לא נמצאה — הצג את ההזמנות הקיימות ובקש לדייק.
 - **שאלה על דיווחים של לקוח ספציפי** ("הדיווח האחרון בפאראגון", "מתי עבדתי לכפרית") → query_hours עם client_name (list=true). אל תסתמך על רשימת ה-10 האחרונים — תמיד סנן לפי הלקוח.
-- "כמה לגבות" / "מה פתוח אצל <לקוח>" → query_billing | "סמן ש<לקוח> שילם / הנפיקו חשבונית" → update_billing (אשר עם חגי קודם!)
+- **"דיווחים שלא טופלו" / "מה עוד לא נסגר/חויב" / "דיווחים פתוחים"** → query_hours עם **unhandled=true** (דיווחי *שעות* שלא נסגרו במחזור החודשי). זה **שונה** מ"כמה לגבות". אל תחזיר query_billing במקום! עם לקוח בהקשר — הוסף client_name.
+- "כמה לגבות" / "מה פתוח אצל <לקוח>" → query_billing (חשבוניות גבייה — *לא* דיווחי שעות) | "סמן ש<לקוח> שילם / הנפיקו חשבונית" → update_billing (אשר עם חגי קודם!)
 - "צור משימה..." / "סגור משימה..." / "המשימות שלי" → manage_tasks
 - "כמה צרכת / כמה אתה עולה לי" → usage_report (today). מסור את המספרים כפי שהם — אל תסכם ל"אפס/חינמי" גם אם קטן.
 - "גרף שבועי/חודשי" → usage_report עם week/month, ו**הדבק את הפלט כמו שהוא, כולל גרף העמודות (השורות עם █ ו-░)**. אל תתאר אותו במילים ואל תמחק את הגרף.
@@ -582,6 +584,7 @@ async function handleTool(name: string, input: Record<string, unknown>, msg: Inb
         date_to:     s('date_to') || undefined,
         period:      (s('period') || undefined) as 'today' | 'week' | 'month' | undefined,
         list:        b('list'),
+        unhandled:   b('unhandled'),
       })
 
     case 'query_billing':

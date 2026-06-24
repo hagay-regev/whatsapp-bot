@@ -159,11 +159,12 @@ export async function listOrders(client_name: string): Promise<string> {
 }
 
 export async function queryHours(opts: {
-  period?: 'today' | 'week' | 'month'; date_from?: string; date_to?: string; list?: boolean; client_name?: string
+  period?: 'today' | 'week' | 'month'; date_from?: string; date_to?: string; list?: boolean; client_name?: string; unhandled?: boolean
 } = {}): Promise<string> {
   const uid = await ownerId()
   const today = ilToday()
-  const list = opts.list ?? false
+  // "unhandled" reports default to a detailed list over a wide window.
+  const list = opts.list ?? opts.unhandled ?? false
 
   // Resolve client filter (so "last entries for <client>" works regardless of how
   // deep they are in the monthly list).
@@ -172,6 +173,22 @@ export async function queryHours(opts: {
     const m = matchClient(await getClients(), opts.client_name)
     if (!m) return `❌ לא מצאתי לקוח בשם "${opts.client_name}".`
     clientId = m.id
+  }
+
+  // Reports not yet closed in the monthly billing cycle ("שלא טופלו").
+  if (opts.unhandled) {
+    let q = db.from('time_entries')
+      .select('date, work_hours, type, is_billable, description, clients(name)')
+      .eq('user_id', uid).eq('monthly_cycle_done', false)
+    if (clientId) q = q.eq('client_id', clientId)
+    const { data } = await q.order('date', { ascending: false }).limit(clientId ? 50 : 30)
+    const rows = (data ?? []) as Array<{ date: string; work_hours: number; type: string; is_billable: boolean; description: string; clients?: { name?: string } | null }>
+    const clientLbl = opts.client_name ? ` — ${opts.client_name}` : ''
+    if (!rows.length) return `✅ אין דיווחים שלא טופלו${clientLbl}.`
+    const d = (s: string) => `${s.slice(8)}/${s.slice(5, 7)}/${s.slice(0, 4)}`
+    const totalH = rows.reduce((sm, r) => sm + Number(r.work_hours ?? 0), 0)
+    const lines = rows.map(r => `• ${d(r.date)} | ${r.clients?.name ?? '—'} | ${Number(r.work_hours).toFixed(1)}h${r.is_billable ? ' 💰' : ''}${r.description ? ` — ${r.description.slice(0, 35)}` : ''}`)
+    return `🗂 דיווחים שלא טופלו${clientLbl} (${rows.length}, ${totalH.toFixed(1)}h):\n\n${lines.join('\n')}`
   }
 
   // Explicit date range (model-driven) takes priority over period presets.
