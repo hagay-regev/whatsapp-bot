@@ -178,16 +178,19 @@ export async function queryHours(opts: {
   // Reports not yet closed in the monthly billing cycle ("שלא טופלו").
   if (opts.unhandled) {
     let q = db.from('time_entries')
-      .select('date, work_hours, type, is_billable, description, clients(name)')
+      .select('date, work_hours, start_time, end_time, type, is_billable, description, clients(name)')
       .eq('user_id', uid).eq('monthly_cycle_done', false)
     if (clientId) q = q.eq('client_id', clientId)
     const { data } = await q.order('date', { ascending: false }).limit(clientId ? 50 : 30)
-    const rows = (data ?? []) as Array<{ date: string; work_hours: number; type: string; is_billable: boolean; description: string; clients?: { name?: string } | null }>
+    const rows = (data ?? []) as Array<{ date: string; work_hours: number; start_time?: string | null; end_time?: string | null; type: string; is_billable: boolean; description: string; clients?: { name?: string } | null }>
     const clientLbl = opts.client_name ? ` — ${opts.client_name}` : ''
     if (!rows.length) return `✅ אין דיווחים שלא טופלו${clientLbl}.`
     const d = (s: string) => `${s.slice(8)}/${s.slice(5, 7)}/${s.slice(0, 4)}`
+    const hm = (t?: string | null) => t ? t.slice(0, 5) : ''
+    const span = (r: { start_time?: string | null; end_time?: string | null }) =>
+      r.start_time && r.end_time ? ` (${hm(r.start_time)}–${hm(r.end_time)})` : ''
     const totalH = rows.reduce((sm, r) => sm + Number(r.work_hours ?? 0), 0)
-    const lines = rows.map(r => `• ${d(r.date)} | ${r.clients?.name ?? '—'} | ${Number(r.work_hours).toFixed(1)}h${r.is_billable ? ' 💰' : ''}${r.description ? ` — ${r.description.slice(0, 35)}` : ''}`)
+    const lines = rows.map(r => `• ${d(r.date)}${span(r)} | ${r.clients?.name ?? '—'} | ${Number(r.work_hours).toFixed(1)}h${r.is_billable ? ' 💰' : ''}${r.description ? ` — ${r.description.slice(0, 35)}` : ''}`)
     return `🗂 דיווחים שלא טופלו${clientLbl} (${rows.length}, ${totalH.toFixed(1)}h):\n\n${lines.join('\n')}`
   }
 
@@ -215,14 +218,17 @@ export async function queryHours(opts: {
 
   if (list) {
     let q = db.from('time_entries')
-      .select('date, work_hours, description, clients(name)')
+      .select('date, work_hours, start_time, end_time, description, clients(name)')
       .eq('user_id', uid).gte('date', from).lte('date', to)
     if (clientId) q = q.eq('client_id', clientId)
     const { data } = await q.order('date', { ascending: false }).limit(clientId ? 20 : 10)
-    const rows = (data ?? []) as Array<{ date: string; work_hours: number; description: string; clients?: { name?: string } | null }>
+    const rows = (data ?? []) as Array<{ date: string; work_hours: number; start_time?: string | null; end_time?: string | null; description: string; clients?: { name?: string } | null }>
     if (!rows.length) return `📋 אין דיווחים (${label}${clientLabel}).`
     const d = (s: string) => `${s.slice(8)}/${s.slice(5, 7)}/${s.slice(0, 4)}`  // DD/MM/YYYY — full + unambiguous
-    return `📋 דיווחים (${label}${clientLabel}) — מהחדש לישן:\n${rows.map(r => `• ${d(r.date)} | ${r.clients?.name ?? '—'} | ${Number(r.work_hours).toFixed(1)}h${r.description ? ` — ${r.description.slice(0, 30)}` : ''}`).join('\n')}`
+    const hm = (t?: string | null) => t ? t.slice(0, 5) : ''
+    const span = (r: { start_time?: string | null; end_time?: string | null }) =>
+      r.start_time && r.end_time ? ` (${hm(r.start_time)}–${hm(r.end_time)})` : ''
+    return `📋 דיווחים (${label}${clientLabel}) — מהחדש לישן:\n${rows.map(r => `• ${d(r.date)}${span(r)} | ${r.clients?.name ?? '—'} | ${Number(r.work_hours).toFixed(1)}h${r.description ? ` — ${r.description.slice(0, 30)}` : ''}`).join('\n')}`
   }
 
   let sq = db.from('time_entries')
