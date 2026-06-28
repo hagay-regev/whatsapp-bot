@@ -131,6 +131,21 @@ export async function logHours(opts: {
   const startMin = (opts.start_time ? Number(opts.start_time.split(':')[0]) || 8 : 8) * 60
   const endMin = startMin + Math.round(opts.hours * 60)
 
+  // Idempotency guard: the model sometimes double-fires log_hours (it retries
+  // when the first tool call is slow to return), creating an identical entry.
+  // Block an identical insert made in the last few minutes — same client, date,
+  // hours, type and description.
+  const sinceIso = new Date(Date.now() - 5 * 60_000).toISOString()
+  const { data: dup } = await db.from('time_entries')
+    .select('id')
+    .eq('user_id', uid).eq('client_id', matched.id).eq('date', date)
+    .eq('start_time', fmt(startMin)).eq('end_time', fmt(endMin))
+    .eq('type', type).eq('description', opts.description ?? '')
+    .gte('created_at', sinceIso).limit(1)
+  if (dup && dup.length) {
+    return `ℹ️ הדיווח כבר נשמר זה עתה (${matched.name}, ${opts.hours}h${opts.description ? ` — ${opts.description}` : ''}) — לא הוספתי כפילות.`
+  }
+
   const { error } = await db.from('time_entries').insert({
     date, client_id: matched.id, user_id: uid, work_order_id: workOrderId,
     start_time: fmt(startMin), end_time: fmt(endMin),
