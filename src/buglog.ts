@@ -32,7 +32,10 @@ export function detectInventedReply(reply: string): string | null {
 }
 
 // ── Manual flag command parsing ───────────────────────────────────────────────
-const FLAG_TOKENS = ['🐛', '👎', 'באג', 'bug', 'Bug', 'BUG']
+// Note: 👎 is intentionally NOT a flag token — it already means "cancel/reject"
+// (in the approval flow and in normal chat), and overloading it for bug-flagging
+// confused things. Flag a bug only with the explicit word באג / bug / 🐛.
+const FLAG_TOKENS = ['🐛', 'באג', 'bug', 'Bug', 'BUG']
 
 export function isBugFlag(body: string): boolean {
   const t = body.trim()
