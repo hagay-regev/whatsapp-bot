@@ -233,17 +233,20 @@ export async function queryHours(opts: {
 
   if (list) {
     let q = db.from('time_entries')
-      .select('date, work_hours, start_time, end_time, description, clients(name)')
+      .select('date, work_hours, start_time, end_time, type, is_billable, description, clients(name)')
       .eq('user_id', uid).gte('date', from).lte('date', to)
     if (clientId) q = q.eq('client_id', clientId)
     const { data } = await q.order('date', { ascending: false }).limit(clientId ? 20 : 10)
-    const rows = (data ?? []) as Array<{ date: string; work_hours: number; start_time?: string | null; end_time?: string | null; description: string; clients?: { name?: string } | null }>
+    const rows = (data ?? []) as Array<{ date: string; work_hours: number; start_time?: string | null; end_time?: string | null; type?: string; is_billable?: boolean; description: string; clients?: { name?: string } | null }>
     if (!rows.length) return `📋 אין דיווחים (${label}${clientLabel}).`
     const d = (s: string) => `${s.slice(8)}/${s.slice(5, 7)}/${s.slice(0, 4)}`  // DD/MM/YYYY — full + unambiguous
     const hm = (t?: string | null) => t ? t.slice(0, 5) : ''
     const span = (r: { start_time?: string | null; end_time?: string | null }) =>
       r.start_time && r.end_time ? ` (${hm(r.start_time)}–${hm(r.end_time)})` : ''
-    return `📋 דיווחים (${label}${clientLabel}) — מהחדש לישן:\n${rows.map(r => `• ${d(r.date)}${span(r)} | ${r.clients?.name ?? '—'} | ${Number(r.work_hours).toFixed(1)}h${r.description ? ` — ${r.description.slice(0, 30)}` : ''}`).join('\n')}`
+    // Show the entry type so "what's billable?" is answered from data, not guessed.
+    const kind = (r: { type?: string; is_billable?: boolean }) =>
+      r.is_billable ? '💰 בתשלום' : (TYPE_LABEL[r.type ?? ''] ?? 'תחזוקה')
+    return `📋 דיווחים (${label}${clientLabel}) — מהחדש לישן:\n${rows.map(r => `• ${d(r.date)}${span(r)} | ${r.clients?.name ?? '—'} | ${Number(r.work_hours).toFixed(1)}h | ${kind(r)}${r.description ? ` — ${r.description.slice(0, 30)}` : ''}`).join('\n')}`
   }
 
   let sq = db.from('time_entries')
