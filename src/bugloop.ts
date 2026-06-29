@@ -78,8 +78,15 @@ export async function pollBugLoop(): Promise<void> {
 }
 
 // Explicit approval words only (no bare כן/לא) so normal chat isn't hijacked.
-const APPROVE = /^\s*(👍|אשר|מאשר|מאושר|לאשר)\b/i
-const REJECT  = /^\s*(👎|דחה|דוחה|לדחות|בטל)\b/i
+// NOTE: don't use \b here — JS \b is ASCII-only, so it never matches after an
+// emoji or a Hebrew word. Match the leading token by prefix instead.
+const APPROVE_TOKENS = ['👍', 'אשר', 'מאשר', 'מאושר', 'לאשר']
+const REJECT_TOKENS  = ['👎', 'דחה', 'דוחה', 'לדחות', 'בטל']
+
+function leadToken(t: string, tokens: string[]): string | null {
+  for (const tok of tokens) if (t === tok || t.startsWith(tok + ' ') || t.startsWith(tok + '\n')) return tok
+  return null
+}
 
 // Owner's reply → decision on the latest pending bug (or a specific #id if named).
 // Returns a confirmation string, or null if it isn't an approval (let it flow on).
@@ -88,14 +95,16 @@ export function applyOwnerDecision(body: string): string | null {
   const pending = bugs.filter(b => b.status === 'pending_user')
   if (!pending.length) return null
   const t = body.trim()
-  const approve = APPROVE.test(t), reject = REJECT.test(t)
-  if (!approve && !reject) return null
+  const appTok = leadToken(t, APPROVE_TOKENS)
+  const rejTok = leadToken(t, REJECT_TOKENS)
+  if (!appTok && !rejTok) return null
+  const approve = !!appTok
 
-  const idMatch = t.match(/\b(b[0-9a-z]+)\b/i)
+  const idMatch = t.match(/\b(b[0-9a-z]+)\b/i)   // ids are ASCII, \b is fine here
   const target = idMatch ? pending.find(b => b.id === idMatch[1]) : pending[pending.length - 1]
   if (!target) return null
 
-  const note = t.replace(APPROVE, '').replace(REJECT, '').replace(/\b(b[0-9a-z]+)\b/i, '').trim()
+  const note = t.slice((appTok ?? rejTok)!.length).replace(/\b(b[0-9a-z]+)\b/i, '').trim()
   updateBug(target.id, { status: approve ? 'approved' : 'rejected', ...(note ? { user_note: note } : {}) })
   return approve
     ? `👍 אושר — באג ${target.id} ייכנס לטיפול ויעלה. אעדכן כשיהיה מוכן.`
