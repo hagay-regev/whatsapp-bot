@@ -14,6 +14,7 @@ import { config } from './config'
 import { parseGatewayPayload, sendMessage } from './whatsapp'
 import { runAgent, shouldRespondInGroup } from './agent'
 import { transcribeVoice, describeImage } from './voice'
+import { detectInventedReply, flagBug, isBugFlag, bugNote } from './buglog'
 
 const app = express()
 // Images arrive base64-encoded inside the JSON payload (a photo is ~150KB+),
@@ -190,6 +191,22 @@ app.post('/webhook', async (req, res) => {
       /^\s*(👍|👎|כן|לא|אשר|בטל|מאשר|דחה|אוקיי|אישור)\s*$/.test(msg.body.trim())
     if (!explicit && !ownerConfirm && !(await shouldRespondInGroup(msg, getHistory(historyKey)))) return
   } else {
+    // Bug queue (step 1): owner flags the PREVIOUS bot reply with באג/🐛/👎.
+    // Must run before we append this message to history (we want the last reply).
+    if (msg.isFromOwner && isBugFlag(msg.body)) {
+      const hist = getHistory('private')
+      const back = [...hist].reverse().findIndex(h => h.sender === 'רגב')
+      if (back === -1) { await sendMessage(msg.chatId, 'אין הודעה אחרונה של רגב לסמן 🤔'); return }
+      const idx = hist.length - 1 - back
+      const note = bugNote(msg.body)
+      flagBug({
+        reason: note ? `user_flag: ${note}` : 'user_flag',
+        chatId: msg.chatId, isGroup: false,
+        userText: idx > 0 ? hist[idx - 1].body : '', botReply: hist[idx].body,
+      })
+      await sendMessage(msg.chatId, '🐛 נרשם — הבאג נכנס לתור לטיפול.')
+      return
+    }
     // Private chats get history too, so follow-ups like "תסמן שנקרא" keep context
     appendHistory(historyKey, 'חגי', msg.body)
   }
@@ -211,6 +228,13 @@ app.post('/webhook', async (req, res) => {
       await sendMessage(msg.chatId, reply)
       appendHistory(historyKey, 'רגב', reply)
       console.log(`[reply] ${reply.slice(0, 80)}`)
+      // Auto-detect (step 1): only on the owner's private chat — that's where the
+      // tool bugs surface, and it avoids flagging legit "no access to YOUR data"
+      // replies sent to non-owners in groups.
+      if (!msg.isGroup && msg.isFromOwner) {
+        const tag = detectInventedReply(reply)
+        if (tag) flagBug({ reason: `auto:${tag}`, chatId: msg.chatId, isGroup: false, userText: msg.body, botReply: reply })
+      }
     }
   } catch (err) {
     console.error('Agent error:', err)
