@@ -56,7 +56,8 @@ export interface BugEntry {
 
 export function flagBug(entry: BugEntry): void {
   try {
-    const line = JSON.stringify({ ts: new Date().toISOString(), status: 'open', ...entry })
+    const id = 'b' + Date.now().toString(36)
+    const line = JSON.stringify({ id, ts: new Date().toISOString(), status: 'open', ...entry })
     fs.appendFileSync(BUGS_PATH, line + '\n')
     console.log(`[bug] queued (${entry.reason}): ${entry.botReply.slice(0, 60).replace(/\n/g, ' ')}`)
   } catch (err) {

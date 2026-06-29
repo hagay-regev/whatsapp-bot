@@ -15,6 +15,7 @@ import { parseGatewayPayload, sendMessage } from './whatsapp'
 import { runAgent, shouldRespondInGroup } from './agent'
 import { transcribeVoice, describeImage } from './voice'
 import { detectInventedReply, flagBug, isBugFlag, bugNote } from './buglog'
+import { pollBugLoop, applyOwnerDecision } from './bugloop'
 
 const app = express()
 // Images arrive base64-encoded inside the JSON payload (a photo is ~150KB+),
@@ -191,6 +192,11 @@ app.post('/webhook', async (req, res) => {
       /^\s*(👍|👎|כן|לא|אשר|בטל|מאשר|דחה|אוקיי|אישור)\s*$/.test(msg.body.trim())
     if (!explicit && !ownerConfirm && !(await shouldRespondInGroup(msg, getHistory(historyKey)))) return
   } else {
+    // Bug loop (step 2): owner's 👍/👎 approves/rejects a pending fix.
+    if (msg.isFromOwner) {
+      const decision = applyOwnerDecision(msg.body)
+      if (decision) { await sendMessage(msg.chatId, decision); return }
+    }
     // Bug queue (step 1): owner flags the PREVIOUS bot reply with באג/🐛/👎.
     // Must run before we append this message to history (we want the last reply).
     if (msg.isFromOwner && isBugFlag(msg.body)) {
@@ -248,3 +254,6 @@ app.listen(config.port, () => {
   console.log(`   Owner phone: ${config.ownerPhone}`)
   console.log(`   WAHA: ${config.wahaUrl}`)
 })
+
+// Bug loop (step 2): every 30s, push approval requests / done-notices to the owner.
+setInterval(() => { pollBugLoop().catch(err => console.error('[bugloop]', err)) }, 30_000)
