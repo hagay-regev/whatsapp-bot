@@ -304,7 +304,15 @@ export async function queryBilling(opts: { client_name?: string; status?: 'unpai
   }
 
   const total = rows.reduce((s, r) => s + (r.total_with_vat ?? 0), 0)
-  const lines = rows.map(r => `• ${r.clients?.name ?? ''} — ₪${Math.round(r.total_with_vat).toLocaleString()}${r.expected_payment_date ? ` (עד ${r.expected_payment_date.slice(0, 10)})` : ''}`)
+  // Show period + paid/unpaid per row so "which are unpaid?" is answered from
+  // data (the query already fetches is_paid/period — just surface them).
+  const showStatus = status === 'all'
+  const lines = rows.map(r => {
+    const per = r.period ? ` ${r.period}` : ''
+    const st  = showStatus ? ` ${r.is_paid ? '✅ שולם' : '⏳ פתוח'}` : ''
+    const due = r.expected_payment_date ? ` (עד ${r.expected_payment_date.slice(0, 10)})` : ''
+    return `• ${r.clients?.name ?? ''}${per} — ₪${Math.round(r.total_with_vat).toLocaleString()}${st}${due}`
+  })
   return `${status === 'unpaid' ? '💰 חשבוניות לגבייה' : '📋 חשבוניות'} (${rows.length}):\n\n${lines.join('\n')}\n\n*סה"כ: ₪${Math.round(total).toLocaleString()}*`
 }
 
