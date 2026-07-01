@@ -26,6 +26,8 @@ export interface Bug {
   ts: string
   status: BugStatus
   reason: string
+  kind?: 'bug' | 'feature'
+  request?: string        // for features: what to build
   chatId: string
   isGroup: boolean
   userText: string

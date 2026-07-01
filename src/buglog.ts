@@ -48,9 +48,27 @@ export function bugNote(body: string): string {
   return ''
 }
 
+// ── Feature requests ──────────────────────────────────────────────────────────
+// Same queue, kind "feature" — a free-text request to BUILD something, not tied
+// to a previous reply. Trigger: פיצ'ר / פיצר / פיתוח / feature <description>.
+const FEATURE_TOKENS = ["פיצ'ר", 'פיצ׳ר', 'פיצ’ר', 'פיצר', 'פיתוח', 'feature', 'Feature']
+
+export function isFeatureRequest(body: string): boolean {
+  const t = body.trim()
+  return FEATURE_TOKENS.some(tok => t === tok || t.startsWith(tok + ' ') || t.startsWith(tok + ':') || t.startsWith(tok + '\n'))
+}
+
+export function featureText(body: string): string {
+  const t = body.trim()
+  for (const tok of FEATURE_TOKENS) if (t.startsWith(tok)) return t.slice(tok.length).replace(/^[\s:]+/, '').trim()
+  return ''
+}
+
 // ── Queue writer ──────────────────────────────────────────────────────────────
 export interface BugEntry {
-  reason: string        // "auto:<tag>" or "user_flag[: note]"
+  reason: string        // "auto:<tag>" or "user_flag[: note]" or "feature"
+  kind?: 'bug' | 'feature'
+  request?: string      // for features: the free-text description of what to build
   chatId: string
   isGroup: boolean
   userText: string      // the message that triggered the bad reply

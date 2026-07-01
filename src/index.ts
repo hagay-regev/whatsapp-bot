@@ -14,7 +14,7 @@ import { config } from './config'
 import { parseGatewayPayload, sendMessage } from './whatsapp'
 import { runAgent, shouldRespondInGroup } from './agent'
 import { transcribeVoice, describeImage } from './voice'
-import { detectInventedReply, flagBug, isBugFlag, bugNote } from './buglog'
+import { detectInventedReply, flagBug, isBugFlag, bugNote, isFeatureRequest, featureText } from './buglog'
 import { pollBugLoop, applyOwnerDecision } from './bugloop'
 
 const app = express()
@@ -211,6 +211,14 @@ app.post('/webhook', async (req, res) => {
         userText: idx > 0 ? hist[idx - 1].body : '', botReply: hist[idx].body,
       })
       await sendMessage(msg.chatId, '🐛 נרשם — הבאג נכנס לתור לטיפול.')
+      return
+    }
+    // Dev inbox (step 1): owner requests a NEW feature with פיצ'ר/פיתוח <תיאור>.
+    if (msg.isFromOwner && isFeatureRequest(msg.body)) {
+      const text = featureText(msg.body)
+      if (!text) { await sendMessage(msg.chatId, "מה הפיצ'ר? כתוב: פיצ'ר <תיאור מה לבנות>"); return }
+      flagBug({ reason: 'feature', kind: 'feature', request: text, chatId: msg.chatId, isGroup: false, userText: text, botReply: '' })
+      await sendMessage(msg.chatId, '🧩 פיצ׳ר נרשם — נכנס לתור לפיתוח.')
       return
     }
     // Private chats get history too, so follow-ups like "תסמן שנקרא" keep context
