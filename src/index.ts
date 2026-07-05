@@ -160,19 +160,13 @@ app.post('/webhook', async (req, res) => {
     return
   }
 
-  // In private chats: only respond to owner.
+  // In private chats: only respond to the owner. The owner is identified in
+  // parseGatewayPayload by phone OR by the owner's known @lid (config.ownerLid).
+  // SECURITY: do NOT treat *any* @lid sender as the owner — that let strangers
+  // messaging the bot privately get full owner access to Hagai's data.
   if (!msg.isGroup && !msg.isFromOwner) {
-    // WhatsApp sometimes reports the owner's own messages using a
-    // privacy-preserving @lid identifier (a long pseudo-random ID) instead
-    // of the real phone number, which can never match OWNER_PHONE. Since
-    // this bot's private chat is only used by the owner, treat @lid senders
-    // in private chats as the owner rather than rejecting them.
-    if (msg.chatId.includes('@lid')) {
-      msg.isFromOwner = true
-    } else {
-      await sendMessage(msg.chatId, 'מצטער, אני הבוט האישי של חגי. אינני יכול לעזור לך.')
-      return
-    }
+    await sendMessage(msg.chatId, 'מצטער, אני הבוט האישי של חגי. אינני יכול לעזור לך.')
+    return
   }
 
   // History key: private chats may arrive under different chat ids for the same
