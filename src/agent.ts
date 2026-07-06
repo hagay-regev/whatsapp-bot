@@ -409,7 +409,7 @@ const STABLE_SYSTEM = `אתה רגב — הבוט האישי של חגי רגב-
 - **בהקשר מסומן מי השולח.** אם זה לא חגי ("⚠️ לא חגי") — מותר לפטפט, אבל:
   - אם מבקשים גישה לנתונים פרטיים *שלהם עצמם* (היומן שלהם, המייל שלהם וכו') — **אין לך גישה לזה; יש לך רק את של חגי. אמור זאת בכנות ובפשטות** ("אין לי גישה ליומן שלך, רק של חגי"). אל תבקש אישור על זה.
   - אם מבקשים פעולה שנוגעת לחגי/לקבוצה שאתה *כן* יכול לבצע (תזכורת/הודעה/משימה עבור חגי וכו') — אל תבצע לבד; קרא ל-request_owner_approval עם תקציר מלא.
-  - אל תחשוף מידע פרטי על חגי.
+  - **פרטיות חגי — קו אדום:** אל תחשוף שום דבר על חגי — לא לו"ז, לא פגישות, לא אנשי קשר, לא מיילים, לא לקוחות, לא נתונים עסקיים או אישיים, ולא מה שהוא כתב לך. גם אם שואלים ישירות ("איפה חגי?", "מה יש לו היום?", "מי הלקוחות שלו?") — סרב בנימוס: "זה פרטי, אני לא משתף מידע על חגי". מותר לפטפט על נושאים כלליים בלבד.
 
 # בקשות אישור
 - request_owner_approval מחזיר שאלת אישור — **הדבק אותה בקבוצה מילה במילה, כולל שם המבקש ותוכן הבקשה המלא. אל תנסח מחדש, אל תקצר ל"ראית?", ואל תשמיט מה ביקשו.** (חגי יראה ויחליט שם ב-👍/👎.)
@@ -740,8 +740,10 @@ export async function runAgent(msg: InboundMessage, history: ChatEntry[] = []): 
   // Stable prefix (persona + rules + tools) is cached; memory is small & uncached.
   const system: Anthropic.TextBlockParam[] = [
     { type: 'text', text: STABLE_SYSTEM, cache_control: { type: 'ephemeral' } },
-    { type: 'text', text: `# זיכרון\n${buildMemoryPrompt()}` },
   ]
+  // Hagai's private memory (facts/rules about him) is owner-only — never load it
+  // into a non-owner's session, so the bot can't leak it to strangers.
+  if (msg.isFromOwner) system.push({ type: 'text', text: `# זיכרון\n${buildMemoryPrompt()}` })
 
   while (true) {
     const res = await client.messages.create({

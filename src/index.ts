@@ -154,25 +154,21 @@ app.post('/webhook', async (req, res) => {
   // under different sender identifiers (e.g. <phone>@c.us and <lid>@lid),
   // which would have different chatIds — so for private chats dedup on the
   // message body alone (shared across all private chats), not the chatId.
-  const dedupKey = msg.isGroup ? msg.chatId : 'private'
+  // Private dedup/history are keyed per-sender: the owner shares ONE bucket
+  // (their msgs arrive under both @c.us and @lid); each non-owner gets their own.
+  const privateKey = msg.isFromOwner ? 'private' : `dm:${msg.senderPhone}`
+  const dedupKey = msg.isGroup ? msg.chatId : privateKey
   if (isDuplicateMessage(dedupKey, msg.body)) {
     console.log(`[dedup] skipping duplicate message in ${msg.chatId}: ${msg.body.slice(0, 50)}`)
     return
   }
 
-  // In private chats: only respond to the owner. The owner is identified in
-  // parseGatewayPayload by phone OR by the owner's known @lid (config.ownerLid).
-  // SECURITY: do NOT treat *any* @lid sender as the owner — that let strangers
-  // messaging the bot privately get full owner access to Hagai's data.
-  if (!msg.isGroup && !msg.isFromOwner) {
-    await sendMessage(msg.chatId, 'מצטער, אני הבוט האישי של חגי. אינני יכול לעזור לך.')
-    return
-  }
-
-  // History key: private chats may arrive under different chat ids for the same
-  // conversation (@c.us vs @lid), so key all private history under one bucket —
-  // this bot serves a single owner, so there is only one private conversation.
-  const historyKey = msg.isGroup ? msg.chatId : 'private'
+  // Private chats: the owner (identified in parseGatewayPayload by phone or
+  // config.ownerLid) gets full access. NON-owners are ANSWERED too, but walled
+  // off — the agent gives them only request_owner_approval (no access to Hagai's
+  // data), their OWN history thread, and NOT Hagai's private memory. Never treat
+  // an @lid sender as the owner (that was a hole granting strangers full access).
+  const historyKey = msg.isGroup ? msg.chatId : privateKey
 
   // In groups: always log to history, then let the model decide if רגב is being
   // addressed. Explicit name → respond immediately (cheap fast-path); otherwise
@@ -215,8 +211,9 @@ app.post('/webhook', async (req, res) => {
       await sendMessage(msg.chatId, '🧩 פיצ׳ר נרשם — נכנס לתור לפיתוח.')
       return
     }
-    // Private chats get history too, so follow-ups like "תסמן שנקרא" keep context
-    appendHistory(historyKey, 'חגי', msg.body)
+    // Log the incoming message under the right sender (owner = חגי; a non-owner
+    // keeps their own name in their own thread — never mixed into Hagai's).
+    appendHistory(historyKey, msg.isFromOwner ? 'חגי' : msg.senderName, msg.body)
   }
 
   // Rate limit: at least 3s between replies to same chat
