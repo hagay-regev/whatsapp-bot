@@ -11,11 +11,10 @@ import express from 'express'
 import fs from 'fs'
 import path from 'path'
 import { config } from './config'
-import { parseGatewayPayload, sendMessage } from './whatsapp'
+import { parseGatewayPayload, sendMessage, InboundMessage } from './whatsapp'
 import { runAgent, shouldRespondInGroup } from './agent'
 import { transcribeVoice, describeImage } from './voice'
 import { detectInventedReply, flagBug, isBugFlag, bugNote, isFeatureRequest, featureText } from './buglog'
-import { hasEntriesForDate } from './billing'
 import { pollBugLoop, applyOwnerDecision } from './bugloop'
 
 const app = express()
@@ -285,18 +284,27 @@ app.listen(config.port, () => {
 // Bug loop (step 2): every 30s, push approval requests / done-notices to the owner.
 setInterval(() => { pollBugLoop().catch(err => console.error('[bugloop]', err)) }, 30_000)
 
-// End-of-day nudge: on a work day (Sun–Thu) at 19:00 Israel, if the owner logged
-// no hours today, ask whether he forgot to report.
-let lastHoursNudgeDay = ''
+// End-of-day daily summary: at 19:00 Israel on work days (Sun–Thu), have רגב
+// summarize today's logged hours and cross-check the calendar to flag anything
+// that may be missing a report. Runs the agent with a synthetic owner request.
+let lastDailySummaryDay = ''
 setInterval(() => {
   const now = new Date()
   const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(now)                                          // YYYY-MM-DD
   const hm  = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit', hour12: false }).format(now)  // HH:MM
-  if (hm !== '19:00' || lastHoursNudgeDay === day) return
-  lastHoursNudgeDay = day
+  if (hm !== '19:00' || lastDailySummaryDay === day) return
+  lastDailySummaryDay = day
   const dow = new Date(day + 'T12:00:00Z').getUTCDay()  // 0=Sun … 6=Sat
   if (dow === 5 || dow === 6) return                     // skip Fri/Sat (Israeli weekend)
-  hasEntriesForDate(day)
-    .then(has => { if (!has) return sendMessage(config.ownerPhone, 'היי 👋 לא ראיתי דיווחי שעות היום — שכחת לדווח? אם עבדת, שלח לי ואתעד.') })
-    .catch(err => console.error('[hours-nudge]', (err as Error).message))
+  const prompt = `סיכום יומי (${day}) — עשה שני דברים:\n` +
+    `1) הצג את דיווחי השעות שתיעדתי היום: לקוח, שעות, תיאור, וסה"כ שעות (query_hours עם period=today, list=true).\n` +
+    `2) הצלב מול היומן שלי של היום (get_schedule להיום): אם היו פגישות/אירועים — בעיקר עם לקוחות — שאין להם דיווח שעות תואם, ציין "⚠️ אולי לא תיעדת: <מה>".\n` +
+    `אם הכל מכוסה — "הכל מדווח 👍". אם לא תיעדתי כלום — שאל אם שכחתי. תמציתי, ורק לפי הנתונים — בלי להמציא.`
+  const synthetic: InboundMessage = {
+    chatId: config.ownerPhone, senderPhone: config.ownerPhone.replace(/\D/g, ''), senderName: 'חגי',
+    body: prompt, isGroup: false, isFromOwner: true, isReplyToBot: false, messageType: 'chat',
+  }
+  runAgent(synthetic, [])
+    .then(reply => { if (reply) return sendMessage(config.ownerPhone, `📋 *סיכום יומי*\n\n${reply}`) })
+    .catch(err => console.error('[daily-summary]', (err as Error).message))
 }, 60_000)
