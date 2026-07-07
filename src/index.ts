@@ -66,6 +66,11 @@ export function getHistory(chatId: string): ChatEntry[] {
 const lastReplyAt = new Map<string, number>()
 const MIN_REPLY_INTERVAL_MS = 3000  // minimum 3s between replies per chat
 
+// ── Third-party alerts: tell the owner when a NON-owner engages the bot, so Hagai
+// always knows who talked to רגב and what they wanted. Throttled per sender. ──────
+const lastThirdPartyAlert = new Map<string, number>()
+const THIRD_PARTY_ALERT_MS = 10 * 60_000  // one heads-up per sender per 10 min
+
 // ── Dedup (some gateways/WAHA deliver the same inbound message more than once,
 // e.g. via duplicate webhook events with slightly different payload shapes —
 // this can cause the SAME message to be processed twice with different results,
@@ -233,6 +238,18 @@ app.post('/webhook', async (req, res) => {
     return
   }
   lastReplyAt.set(msg.chatId, now)
+
+  // Third-party alert: the bot is about to respond to a NON-owner — give Hagai a
+  // private heads-up (who, where, what they said). Throttled per sender.
+  if (!msg.isFromOwner) {
+    const last = lastThirdPartyAlert.get(msg.senderPhone) ?? 0
+    if (now - last > THIRD_PARTY_ALERT_MS) {
+      lastThirdPartyAlert.set(msg.senderPhone, now)
+      const where = msg.isGroup ? `בקבוצה "${msg.groupName ?? msg.chatId}"` : 'בפרטי'
+      sendMessage(config.ownerPhone, `👤 *${msg.senderName}* פנה אליי ${where}:\n"${msg.body.slice(0, 250)}"`)
+        .catch(err => console.error('[3rd-party-alert]', (err as Error).message))
+    }
+  }
 
   console.log(`[${new Date().toISOString()}] ${msg.isGroup ? '👥' : '💬'} ${msg.senderName}: ${msg.body}`)
 
