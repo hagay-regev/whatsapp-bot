@@ -283,15 +283,3 @@ app.listen(config.port, () => {
 
 // Bug loop (step 2): every 30s, push approval requests / done-notices to the owner.
 setInterval(() => { pollBugLoop().catch(err => console.error('[bugloop]', err)) }, 30_000)
-
-// Proactive daily "good morning" to the owner at 09:00 Israel time.
-let lastGoodMorningDay = ''
-setInterval(() => {
-  const now = new Date()
-  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(now)          // YYYY-MM-DD
-  const hm  = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit', hour12: false }).format(now)  // HH:MM
-  if (hm === '09:00' && lastGoodMorningDay !== day) {
-    lastGoodMorningDay = day
-    sendMessage(config.ownerPhone, 'בוקר טוב חגי! ☀️').catch(err => console.error('[goodmorning]', (err as Error).message))
-  }
-}, 60_000)
