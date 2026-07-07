@@ -114,7 +114,7 @@ async function findWorkOrder(clientId: string, order: string): Promise<{ wo?: Wo
 const woLabel = (w: WorkOrder) => `#${w.order_number}${w.title || w.description ? ` ${w.title || w.description}` : ''}`
 
 export async function logHours(opts: {
-  client_name: string; hours: number; type?: string; description?: string; date?: string; start_time?: string; order?: string
+  client_name: string; hours: number; type?: string; description?: string; date?: string; start_time?: string; order?: string; confirm?: boolean
 }): Promise<string> {
   if (!opts.hours || opts.hours <= 0) return '❌ כמה שעות?'
   const clients = await getClients()
@@ -138,6 +138,13 @@ export async function logHours(opts: {
   const fmt = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}:00`
   const startMin = (opts.start_time ? Number(opts.start_time.split(':')[0]) || 8 : 8) * 60
   const endMin = startMin + Math.round(opts.hours * 60)
+
+  // CONFIRM GATE (code-enforced): everything is validated above (client + order
+  // found). Without confirm=true we PREVIEW and write NOTHING — the actual insert
+  // happens only on a follow-up call with confirm=true, after Hagai's 👍.
+  if (!opts.confirm) {
+    return `🔎 *לפני שאני מתעד — לאישור:*\n🏢 ${matched.name}\n🕐 ${opts.hours}h — ${TYPE_LABEL[type] ?? type}\n📅 ${date}${orderLine}${opts.description ? `\n📝 ${opts.description}` : ''}\n\n👍 לאישור?`
+  }
 
   // Idempotency guard: the model sometimes double-fires log_hours (it retries
   // when the first tool call is slow to return), creating an identical entry.

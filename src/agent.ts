@@ -216,7 +216,7 @@ const tools: Anthropic.Tool[] = [
   // ── תשלומים / שעות / משימות (מסד הנתונים של אפליקציית התשלומים) ──
   {
     name: 'log_hours',
-    description: 'דווח שעות עבודה ללקוח. השתמש כש: "3 שעות לכפרית, אינסטלציה", "שעה לרגב בתשלום". אם מציינים הזמנה ("על הזמנה 8", "על השדרוג") — העבר order לשיוך הדיווח להזמנה.',
+    description: 'דווח שעות עבודה ללקוח. **תהליך דו-שלבי חובה:** קרא קודם עם confirm=false — הכלי מאמת (מוצא את הלקוח/הזמנה) ומחזיר תצוגה לאישור, בלי לכתוב. הצג את התצוגה לחגי, ורק אחרי 👍 קרא שוב עם **אותם ערכים + confirm=true** לתיעוד בפועל. השתמש כש: "3 שעות לכפרית, אינסטלציה".',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -227,6 +227,7 @@ const tools: Anthropic.Tool[] = [
         description: { type: 'string', description: 'תיאור העבודה' },
         date:        { type: 'string', description: 'YYYY-MM-DD (ברירת מחדל: היום)' },
         start_time:  { type: 'string', description: 'שעת התחלה HH:MM (אופציונלי)' },
+        confirm:     { type: 'boolean', description: 'false/ריק = אימות + תצוגה בלבד (לא כותב). true = תיעוד בפועל, רק אחרי אישור 👍 של חגי.' },
       },
       required: ['client_name', 'hours'],
     },
@@ -591,6 +592,7 @@ async function handleTool(name: string, input: Record<string, unknown>, msg: Inb
         description: s('description') || undefined,
         date:        s('date') || undefined,
         start_time:  s('start_time') || undefined,
+        confirm:     b('confirm'),
       })
 
     case 'list_orders':
