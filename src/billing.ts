@@ -56,9 +56,17 @@ let clientsCache: { v: Client[]; t: number } | null = null
 async function getClients(): Promise<Client[]> {
   if (clientsCache && Date.now() - clientsCache.t < 5 * 60_000) return clientsCache.v
   // clients is a global/org table — no per-user ownership column.
-  const { data } = await db.from('clients').select('id, name').order('name')
-  clientsCache = { v: (data ?? []) as Client[], t: Date.now() }
-  return clientsCache.v
+  const { data, error } = await db.from('clients').select('id, name').order('name')
+  const v = (data ?? []) as Client[]
+  // NEVER cache a failed/empty fetch — a transient error would blank the client
+  // list for 5 min and make every lookup fail. On error/empty, serve the last
+  // good cache (if any) and retry next call.
+  if (error || v.length === 0) {
+    if (error) console.error('[getClients] query failed:', error.message)
+    return clientsCache?.v ?? v
+  }
+  clientsCache = { v, t: Date.now() }
+  return v
 }
 
 // Dates must be computed in Israel time — the work day/week boundary is local,
