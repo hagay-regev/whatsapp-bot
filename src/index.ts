@@ -285,14 +285,14 @@ app.listen(config.port, () => {
 // Bug loop (step 2): every 30s, push approval requests / done-notices to the owner.
 setInterval(() => { pollBugLoop().catch(err => console.error('[bugloop]', err)) }, 30_000)
 
-// End-of-day nudge: on a work day (Sun–Thu) at 20:00 Israel, if the owner logged
+// End-of-day nudge: on a work day (Sun–Thu) at 19:00 Israel, if the owner logged
 // no hours today, ask whether he forgot to report.
 let lastHoursNudgeDay = ''
 setInterval(() => {
   const now = new Date()
   const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(now)                                          // YYYY-MM-DD
   const hm  = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit', hour12: false }).format(now)  // HH:MM
-  if (hm !== '20:00' || lastHoursNudgeDay === day) return
+  if (hm !== '19:00' || lastHoursNudgeDay === day) return
   lastHoursNudgeDay = day
   const dow = new Date(day + 'T12:00:00Z').getUTCDay()  // 0=Sun … 6=Sat
   if (dow === 5 || dow === 6) return                     // skip Fri/Sat (Israeli weekend)
