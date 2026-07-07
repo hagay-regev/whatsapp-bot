@@ -15,6 +15,7 @@ import { parseGatewayPayload, sendMessage } from './whatsapp'
 import { runAgent, shouldRespondInGroup } from './agent'
 import { transcribeVoice, describeImage } from './voice'
 import { detectInventedReply, flagBug, isBugFlag, bugNote, isFeatureRequest, featureText } from './buglog'
+import { hasEntriesForDate } from './billing'
 import { pollBugLoop, applyOwnerDecision } from './bugloop'
 
 const app = express()
@@ -283,3 +284,19 @@ app.listen(config.port, () => {
 
 // Bug loop (step 2): every 30s, push approval requests / done-notices to the owner.
 setInterval(() => { pollBugLoop().catch(err => console.error('[bugloop]', err)) }, 30_000)
+
+// End-of-day nudge: on a work day (Sun–Thu) at 20:00 Israel, if the owner logged
+// no hours today, ask whether he forgot to report.
+let lastHoursNudgeDay = ''
+setInterval(() => {
+  const now = new Date()
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(now)                                          // YYYY-MM-DD
+  const hm  = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit', hour12: false }).format(now)  // HH:MM
+  if (hm !== '20:00' || lastHoursNudgeDay === day) return
+  lastHoursNudgeDay = day
+  const dow = new Date(day + 'T12:00:00Z').getUTCDay()  // 0=Sun … 6=Sat
+  if (dow === 5 || dow === 6) return                     // skip Fri/Sat (Israeli weekend)
+  hasEntriesForDate(day)
+    .then(has => { if (!has) return sendMessage(config.ownerPhone, 'היי 👋 לא ראיתי דיווחי שעות היום — שכחת לדווח? אם עבדת, שלח לי ואתעד.') })
+    .catch(err => console.error('[hours-nudge]', (err as Error).message))
+}, 60_000)

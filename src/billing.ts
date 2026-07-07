@@ -188,6 +188,15 @@ export async function listOrders(client_name: string): Promise<string> {
   }).join('\n')}`
 }
 
+// Did the owner log any hours on this date? Used for the end-of-day nudge.
+// On query error we return true (assume yes) so we never nag by mistake.
+export async function hasEntriesForDate(date: string): Promise<boolean> {
+  const uid = await ownerId()
+  const { data, error } = await db.from('time_entries').select('id').eq('user_id', uid).eq('date', date).limit(1)
+  if (error) { console.error('[hasEntriesForDate] failed:', error.message); return true }
+  return (data?.length ?? 0) > 0
+}
+
 export async function queryHours(opts: {
   period?: 'today' | 'week' | 'month'; date_from?: string; date_to?: string; list?: boolean; client_name?: string; unhandled?: boolean
 } = {}): Promise<string> {
