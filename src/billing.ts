@@ -332,9 +332,16 @@ export async function updateBilling(opts: {
   let q = db.from('billing_entries').select('id, period, total_with_vat')
     .eq('client_id', matched.id).eq('is_paid', false).order('expected_payment_date', { ascending: true })
   if (opts.period) q = q.ilike('period', `%${opts.period}%`)
-  const { data } = await q.limit(5)
+  const { data } = await q.limit(50)
   const rows = (data ?? []) as Array<{ id: string; period: string; total_with_vat: number }>
   if (!rows.length) return `❌ לא מצאתי שורות פתוחות לגבייה עבור ${matched.name}.`
+
+  // SAFETY (money): never mark multiple charges blindly. Without an explicit
+  // period, if more than one open row matches, mark NOTHING and list them — the
+  // caller must specify a period so we don't touch charges the user didn't mean.
+  if (!opts.period && rows.length > 1) {
+    return `⚠️ ל${matched.name} יש ${rows.length} חיובים פתוחים — *לא סימנתי כלום.* ציין תקופה מדויקת כדי לסמן רק את הנכון:\n${rows.map(r => `• ${r.period} — ₪${Math.round(r.total_with_vat).toLocaleString()}`).join('\n')}`
+  }
 
   for (const r of rows) await db.from('billing_entries').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', r.id)
   const acts = [updates.is_paid && 'סומנה כשולמה ✅', updates.invoice_created && 'חשבונית אושרה 🧾', updates.receipt_issued && 'קבלה הונפקה 📄'].filter(Boolean)
