@@ -91,10 +91,15 @@ export async function createEvent(opts: {
   let end: Record<string, string>
 
   if (all_day || !timePart) {
-    const nextDay = new Date(datePart + 'T00:00:00Z')
-    nextDay.setUTCDate(nextDay.getUTCDate() + 1)
+    // Multi-day all-day range: Google's all-day `end` is EXCLUSIVE, so to span
+    // through an end date (e.g. 27→30) we set end = endDate + 1 day. Without an
+    // end date it's a single day (end = start + 1). This fixes ranges that were
+    // previously collapsed to just the first day.
+    const endDatePart = end_datetime ? end_datetime.split('T')[0] : datePart
+    const endExcl = new Date(endDatePart + 'T00:00:00Z')
+    endExcl.setUTCDate(endExcl.getUTCDate() + 1)
     start = { date: datePart }
-    end   = { date: nextDay.toISOString().slice(0, 10) }
+    end   = { date: endExcl.toISOString().slice(0, 10) }
   } else {
     let endDt: string
     if (end_datetime) {
@@ -126,7 +131,10 @@ export async function createEvent(opts: {
   const data = await res.json() as { error?: unknown }
   if (!res.ok) throw new Error(JSON.stringify(data.error).slice(0, 150))
 
-  const dateStr  = datePart.slice(5).replace('-', '/')
+  const md = (d: string) => d.slice(5).replace('-', '/')
+  // For a multi-day all-day range show start–end (e.g. 27/07–30/07); else one day.
+  const isRange = (all_day || !timePart) && !!end_datetime && end_datetime.split('T')[0] !== datePart
+  const dateStr  = isRange ? `${md(datePart)}–${md(end_datetime!.split('T')[0])}` : md(datePart)
   const timeStr  = timePart ? timePart.slice(0, 5) : 'כל היום'
   const calLabel = calendarName ? ` (${calendarName})` : ''
   return reminder
