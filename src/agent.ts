@@ -53,7 +53,7 @@ const tools: Anthropic.Tool[] = [
   // ── לוח שנה ──
   {
     name: 'add_calendar_event',
-    description: 'הוסף אירוע ליומן Google. השתמש כשמבקשים לקבוע פגישה, תזכורת, אירוע וכו\'.',
+    description: 'הוסף אירוע/פגישה ליומן Google (בלוק זמן). **לא לתזכורות** — "תזכיר לי"/"תזכורת" הולך ל-manage_tasks (משימה שמצפצפת בוואטסאפ). כאן רק פגישה/אירוע.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -61,7 +61,7 @@ const tools: Anthropic.Tool[] = [
         datetime:     { type: 'string',  description: 'תאריך ושעה בפורמט YYYY-MM-DDTHH:MM:00' },
         end_datetime: { type: 'string',  description: 'שעת סיום (אופציונלי) YYYY-MM-DDTHH:MM:00' },
         all_day:      { type: 'boolean', description: 'אירוע כל היום?' },
-        reminder:     { type: 'boolean', description: 'תזכורת (לא אירוע)? true כשמבקשים "תזכורת"/"תזכיר לי" — נכנס ליומן כ"פנוי" (לא חוסם זמן) עם התראה בזמן עצמו, ולא חוסם את היום כמו אירוע.' },
+        reminder:     { type: 'boolean', description: 'כמעט תמיד השאר ריק. תזכורות ("תזכיר לי") הולכות ל-manage_tasks, לא לכאן.' },
         description:  { type: 'string',  description: 'תיאור (אופציונלי)' },
         calendarName: { type: 'string',  description: 'אישי / משפחתי / עבודה' },
         attendees:    { type: 'array', items: { type: 'string' }, description: 'כתובות מייל של משתתפים' },

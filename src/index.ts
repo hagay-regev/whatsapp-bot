@@ -15,6 +15,7 @@ import { parseGatewayPayload, sendMessage, InboundMessage } from './whatsapp'
 import { runAgent, shouldRespondInGroup } from './agent'
 import { transcribeVoice, describeImage } from './voice'
 import { detectInventedReply, flagBug, isBugFlag, bugNote, isFeatureRequest, featureText } from './buglog'
+import { dueReminders, markReminded } from './billing'
 import { pollBugLoop, applyOwnerDecision } from './bugloop'
 
 const app = express()
@@ -283,6 +284,19 @@ app.listen(config.port, () => {
 
 // Bug loop (step 2): every 30s, push approval requests / done-notices to the owner.
 setInterval(() => { pollBugLoop().catch(err => console.error('[bugloop]', err)) }, 30_000)
+
+// Reminders: every 30s, fire due task-reminders to the owner via WhatsApp. The
+// bot sends them itself (the external billing-app scanner didn't reliably ping).
+setInterval(() => {
+  dueReminders().then(async (rs) => {
+    for (const r of rs) {
+      try {
+        await sendMessage(config.ownerPhone, `🔔 *תזכורת:* ${r.title}`)
+        await markReminded(r.id)
+      } catch (err) { console.error('[reminder-send]', (err as Error).message) }
+    }
+  }).catch(err => console.error('[reminder-scan]', (err as Error).message))
+}, 30_000)
 
 // End-of-day daily summary: at 19:00 Israel on work days (Sun–Thu), have רגב
 // summarize today's logged hours and cross-check the calendar to flag anything

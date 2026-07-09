@@ -188,6 +188,28 @@ export async function listOrders(client_name: string): Promise<string> {
   }).join('\n')}`
 }
 
+// ── Reminders: the BOT sends them (don't rely on the billing app's scanner) ────
+// Owner's tasks whose remind_at has passed (within the last 2h, to survive short
+// downtime but not fire ancient ones) and haven't been sent yet.
+export async function dueReminders(): Promise<Array<{ id: string; title: string }>> {
+  const uid = await ownerId()
+  const now = Date.now()
+  const nowIso = new Date(now).toISOString()
+  const sinceIso = new Date(now - 2 * 60 * 60_000).toISOString()
+  const { data, error } = await db.from('tasks')
+    .select('id, title')
+    .eq('assigned_to', uid).eq('reminded', false)
+    .not('remind_at', 'is', null).lte('remind_at', nowIso).gte('remind_at', sinceIso)
+    .in('status', ['open', 'in_progress', 'on_hold'])
+    .limit(10)
+  if (error) { console.error('[dueReminders]', error.message); return [] }
+  return (data ?? []) as Array<{ id: string; title: string }>
+}
+
+export async function markReminded(id: string): Promise<void> {
+  await db.from('tasks').update({ reminded: true }).eq('id', id)
+}
+
 // Did the owner log any hours on this date? Used for the end-of-day nudge.
 // On query error we return true (assume yes) so we never nag by mistake.
 export async function hasEntriesForDate(date: string): Promise<boolean> {
