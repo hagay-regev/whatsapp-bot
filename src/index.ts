@@ -145,16 +145,6 @@ app.post('/webhook', async (req, res) => {
     }
   }
 
-  // TEMP PROBE: capture @-mention structure + the bot's own number for group
-  // messages, to wire up "respond when @-mentioned" (body has @<number>, not "רגב").
-  if (String(rawP.from ?? '').includes('@g.us')) {
-    const data = rawP._data as Record<string, unknown> | undefined
-    const ment = data?.mentionedJidList
-    if (Array.isArray(ment) && ment.length) {
-      console.log(`[probe-mention] to=${JSON.stringify(rawP.to)} self=${JSON.stringify(data?.self ?? data?.id)} mentions=${JSON.stringify(ment)}`)
-    }
-  }
-
   const msg = parseGatewayPayload(payload, config.ownerPhone)
   if (!msg) return
   if (!msg.body.trim()) return
