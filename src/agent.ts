@@ -301,6 +301,7 @@ const tools: Anthropic.Tool[] = [
         due_date:              { type: 'string', description: 'YYYY-MM-DD' },
         due_time:              { type: 'string', description: 'HH:MM' },
         remind_before_minutes: { type: 'number', description: 'התראה כמה דקות לפני' },
+        recur:                 { type: 'string', description: 'תזכורת חוזרת (ל-create עם due_time): daily (כל יום) / weekdays (א׳-ה׳) / weekly (כל שבוע). ריק = חד-פעמי.' },
       },
       required: ['op'],
     },
@@ -458,6 +459,7 @@ const STABLE_SYSTEM = `אתה רגב — הבוט האישי של חגי רגב-
 - "כמה צרכת / כמה אתה עולה לי" → usage_report (today). מסור את המספרים כפי שהם — אל תסכם ל"אפס/חינמי" גם אם קטן.
 - "גרף שבועי/חודשי" → usage_report עם week/month, ו**הדבק את הפלט כמו שהוא, כולל גרף העמודות (השורות עם █ ו-░)**. אל תתאר אותו במילים ואל תמחק את הגרף.
 - **תזכורות = משימה שמצפצפת (לא אירוע ביומן):** "תזכיר לי [בעוד X / מחר ב-9] ל..." / "תזכורת" → **manage_tasks op=create** עם title + due_date + due_time + **remind_before_minutes=0** (המערכת שולחת התראה בוואטסאפ בזמן עצמו). לתזכורת יחסית ("בעוד 10 דק") — חשב את השעה המדויקת. **אל תשתמש ב-add_calendar_event לתזכורות.**
+  - **תזכורת חוזרת** ("כל יום ב-11", "כל בוקר", "כל שבוע", "בימי חול") → אותו manage_tasks op=create עם due_time + **recur** (daily / weekdays / weekly). זה כן נתמך — אל תגיד שאי אפשר.
   - **דחייה** ("תדחה את התזכורת", "עוד שעה", "למחר") → manage_tasks op=update עם search + due_date/due_time חדשים.
   - **ביטול/מחיקה** ("תבטל/תמחק את התזכורת") → manage_tasks op=update עם search + **status=cancelled**.
 - "קבע פגישה/אירוע [עם מישהו / ב...]" = אירוע ביומן → add_calendar_event. אל תבלבל בין אירוע (בלוק זמן/פגישה) לתזכורת (משימה שמצפצפת).
@@ -630,7 +632,7 @@ async function handleTool(name: string, input: Record<string, unknown>, msg: Inb
         title: s('title'), client_name: s('client_name') || undefined,
         priority: s('priority') || undefined, category: s('category') || undefined,
         description: s('description') || undefined, due_date: s('due_date') || undefined,
-        due_time: s('due_time') || undefined, remind_before_minutes: rbm,
+        due_time: s('due_time') || undefined, remind_before_minutes: rbm, recur: s('recur') || undefined,
       })
       if (op === 'update') return await updateTask({
         search: s('search') || s('title'), status: s('status') || undefined,

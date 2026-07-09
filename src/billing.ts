@@ -191,23 +191,45 @@ export async function listOrders(client_name: string): Promise<string> {
 // ── Reminders: the BOT sends them (don't rely on the billing app's scanner) ────
 // Owner's tasks whose remind_at has passed (within the last 2h, to survive short
 // downtime but not fire ancient ones) and haven't been sent yet.
-export async function dueReminders(): Promise<Array<{ id: string; title: string }>> {
+interface DueReminder { id: string; title: string; description?: string | null; due_time?: string | null }
+export async function dueReminders(): Promise<DueReminder[]> {
   const uid = await ownerId()
   const now = Date.now()
   const nowIso = new Date(now).toISOString()
   const sinceIso = new Date(now - 2 * 60 * 60_000).toISOString()
   const { data, error } = await db.from('tasks')
-    .select('id, title')
+    .select('id, title, description, due_time')
     .eq('assigned_to', uid).eq('reminded', false)
     .not('remind_at', 'is', null).lte('remind_at', nowIso).gte('remind_at', sinceIso)
     .in('status', ['open', 'in_progress', 'on_hold'])
     .limit(10)
   if (error) { console.error('[dueReminders]', error.message); return [] }
-  return (data ?? []) as Array<{ id: string; title: string }>
+  return (data ?? []) as DueReminder[]
 }
 
-export async function markReminded(id: string): Promise<void> {
-  await db.from('tasks').update({ reminded: true }).eq('id', id)
+// After a reminder fires: recurring ones (marker "⟳recur:<kind>" in description)
+// get their remind_at advanced to the next occurrence; one-time ones close.
+export async function onReminderFired(r: DueReminder): Promise<void> {
+  const m = (r.description ?? '').match(/⟳recur:(daily|weekdays|weekly)/)
+  if (m && r.due_time) {
+    await db.from('tasks').update({ remind_at: advanceReminderAt(m[1], r.due_time.slice(0, 5)) }).eq('id', r.id)
+  } else {
+    await db.from('tasks').update({ reminded: true }).eq('id', r.id)
+  }
+}
+
+// Next occurrence of dueTime (HH:MM Israel), advancing from today by the recurrence.
+function advanceReminderAt(recur: string, dueTime: string): string {
+  let d = addDays(ilToday(), recur === 'weekly' ? 7 : 1)
+  if (recur === 'weekdays') while (ilDow(d) === 5 || ilDow(d) === 6) d = addDays(d, 1)  // skip Fri/Sat
+  return new Date(`${d}T${dueTime}:00+03:00`).toISOString()
+}
+// First occurrence at/after now: today's dueTime if still ahead, else next day.
+function firstReminderAt(recur: string, dueTime: string): string {
+  const today = ilToday()
+  let d = new Date(`${today}T${dueTime}:00+03:00`).getTime() > Date.now() ? today : addDays(today, 1)
+  if (recur === 'weekdays') while (ilDow(d) === 5 || ilDow(d) === 6) d = addDays(d, 1)
+  return new Date(`${d}T${dueTime}:00+03:00`).toISOString()
 }
 
 // Did the owner log any hours on this date? Used for the end-of-day nudge.
@@ -407,22 +429,31 @@ function remindAtFrom(dueDate?: string, dueTime?: string, beforeMin?: number): s
   return dt.toISOString()
 }
 
+const RECUR_LABEL: Record<string, string> = { daily: 'כל יום', weekdays: 'ימים א׳–ה׳', weekly: 'כל שבוע' }
+
 export async function createTask(opts: {
   title: string; client_name?: string; priority?: string; category?: string; description?: string
-  due_date?: string; due_time?: string; remind_before_minutes?: number
+  due_date?: string; due_time?: string; remind_before_minutes?: number; recur?: string
 }): Promise<string> {
   if (!opts.title) return '❌ חסרה כותרת למשימה.'
   const uid = await ownerId()
   const clientId = opts.client_name ? matchClient(await getClients(), opts.client_name)?.id ?? null : null
 
+  // Recurring reminder: needs a time. Store the recurrence as a marker in the
+  // description and set the first remind_at; the scanner advances it each fire.
+  const recur = opts.recur && ['daily', 'weekdays', 'weekly'].includes(opts.recur) && opts.due_time ? opts.recur : undefined
+  const description = recur ? `${opts.description ? opts.description + ' ' : ''}⟳recur:${recur}` : (opts.description ?? null)
+  const remind_at = recur ? firstReminderAt(recur, opts.due_time!) : remindAtFrom(opts.due_date, opts.due_time, opts.remind_before_minutes)
+
   const { error } = await db.from('tasks').insert({
-    title: opts.title, description: opts.description ?? null,
+    title: opts.title, description,
     priority: opts.priority ?? 'medium', category: opts.category ?? 'general',
     client_id: clientId, assigned_to: uid, created_by: uid,
-    due_date: opts.due_date ?? null, due_time: opts.due_time ?? null,
-    is_all_day: !opts.due_time, remind_at: remindAtFrom(opts.due_date, opts.due_time, opts.remind_before_minutes),
+    due_date: opts.due_date ?? (recur ? ilToday() : null), due_time: opts.due_time ?? null,
+    is_all_day: !opts.due_time, remind_at,
   })
   if (error) return `❌ שגיאה ביצירת משימה: ${error.message}`
+  if (recur) return `✅ תזכורת חוזרת נוצרה!\n🔁 ${opts.title} — 🔔 ${opts.due_time}, ${RECUR_LABEL[recur]}`
   return `✅ משימה נוצרה!\n📌 ${opts.title}\n⚡ ${PRIORITY_LABEL[opts.priority ?? 'medium']}${opts.due_date ? `\n📅 ${opts.due_date}${opts.due_time ? ` ⏰ ${opts.due_time}` : ''}` : ''}`
 }
 

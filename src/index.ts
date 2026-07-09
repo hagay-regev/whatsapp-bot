@@ -15,7 +15,7 @@ import { parseGatewayPayload, sendMessage, InboundMessage } from './whatsapp'
 import { runAgent, shouldRespondInGroup } from './agent'
 import { transcribeVoice, describeImage } from './voice'
 import { detectInventedReply, flagBug, isBugFlag, bugNote, isFeatureRequest, featureText } from './buglog'
-import { dueReminders, markReminded } from './billing'
+import { dueReminders, onReminderFired } from './billing'
 import { pollBugLoop, applyOwnerDecision } from './bugloop'
 
 const app = express()
@@ -292,7 +292,7 @@ setInterval(() => {
     for (const r of rs) {
       try {
         await sendMessage(config.ownerPhone, `🔔 *תזכורת:* ${r.title}`)
-        await markReminded(r.id)
+        await onReminderFired(r)   // recurring → reschedule next; one-time → close
       } catch (err) { console.error('[reminder-send]', (err as Error).message) }
     }
   }).catch(err => console.error('[reminder-scan]', (err as Error).message))
