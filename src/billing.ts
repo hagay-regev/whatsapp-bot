@@ -385,7 +385,7 @@ export async function queryBilling(opts: { client_name?: string; status?: 'unpai
 }
 
 export async function updateBilling(opts: {
-  client_name: string; period?: string; is_paid?: boolean; invoice_created?: boolean; receipt_issued?: boolean
+  client_name: string; period?: string; amount?: number; is_paid?: boolean; invoice_created?: boolean; receipt_issued?: boolean
 }): Promise<string> {
   if (!opts.client_name) return '❌ ציין שם לקוח.'
   const matched = matchClient(await getClients(), opts.client_name)
@@ -401,14 +401,16 @@ export async function updateBilling(opts: {
     .eq('client_id', matched.id).eq('is_paid', false).order('expected_payment_date', { ascending: true })
   if (opts.period) q = q.ilike('period', `%${opts.period}%`)
   const { data } = await q.limit(50)
-  const rows = (data ?? []) as Array<{ id: string; period: string; total_with_vat: number }>
-  if (!rows.length) return `❌ לא מצאתי שורות פתוחות לגבייה עבור ${matched.name}.`
+  let rows = (data ?? []) as Array<{ id: string; period: string; total_with_vat: number }>
+  // Scope by amount when given — the user usually identifies a charge by its sum
+  // (e.g. "the 15,146 one"). Match on the rounded total (₪ tolerance of 1).
+  if (opts.amount != null) rows = rows.filter(r => Math.abs(Math.round(r.total_with_vat) - Math.round(opts.amount!)) <= 1)
+  if (!rows.length) return `❌ לא מצאתי חיוב פתוח תואם ל${matched.name}${opts.amount != null ? ` בסכום ₪${Math.round(opts.amount).toLocaleString()}` : ''}${opts.period ? ` בתקופה ${opts.period}` : ''}.`
 
-  // SAFETY (money): never mark multiple charges blindly. Without an explicit
-  // period, if more than one open row matches, mark NOTHING and list them — the
-  // caller must specify a period so we don't touch charges the user didn't mean.
-  if (!opts.period && rows.length > 1) {
-    return `⚠️ ל${matched.name} יש ${rows.length} חיובים פתוחים — *לא סימנתי כלום.* ציין תקופה מדויקת כדי לסמן רק את הנכון:\n${rows.map(r => `• ${r.period} — ₪${Math.round(r.total_with_vat).toLocaleString()}`).join('\n')}`
+  // SAFETY (money): never mark multiple charges blindly. If more than one open row
+  // still matches (no unique period/amount given), mark NOTHING and list them.
+  if (rows.length > 1) {
+    return `⚠️ ל${matched.name} יש ${rows.length} חיובים פתוחים תואמים — *לא סימנתי כלום.* ציין סכום או תקופה מדויקים:\n${rows.map(r => `• ${r.period} — ₪${Math.round(r.total_with_vat).toLocaleString()}`).join('\n')}`
   }
 
   for (const r of rows) await db.from('billing_entries').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', r.id)

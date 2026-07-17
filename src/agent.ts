@@ -276,7 +276,8 @@ const tools: Anthropic.Tool[] = [
       type: 'object' as const,
       properties: {
         client_name:     { type: 'string', description: 'שם הלקוח' },
-        period:          { type: 'string', description: 'תקופה לסינון (אופציונלי) — בלי זה כל השורות הפתוחות' },
+        amount:          { type: 'number', description: 'סכום החיוב לזיהוי מדויק (למשל 15146) — השתמש בזה כשהמשתמש מזהה חיוב לפי סכום ("תסמן את ה-15,146"). עדיף על period.' },
+        period:          { type: 'string', description: 'תקופה לסינון (אופציונלי), למשל "7/2026"' },
         is_paid:         { type: 'boolean', description: 'סמן כשולם' },
         invoice_created: { type: 'boolean', description: 'חשבונית הונפקה' },
         receipt_issued:  { type: 'boolean', description: 'קבלה הונפקה' },
@@ -454,7 +455,7 @@ const STABLE_SYSTEM = `אתה רגב — הבוט האישי של חגי רגב-
 - **שאלה על דיווחים של לקוח ספציפי** ("הדיווח האחרון בפאראגון", "מתי עבדתי לכפרית") → query_hours עם client_name (list=true). אל תסתמך על רשימת ה-10 האחרונים — תמיד סנן לפי הלקוח.
 - **"דיווחים שלא טופלו" / "מה עוד לא נסגר/חויב" / "דיווחים פתוחים"** → query_hours עם **unhandled=true** (דיווחי *שעות* שלא נסגרו במחזור החודשי). זה **שונה** מ"כמה לגבות". אל תחזיר query_billing במקום! עם לקוח בהקשר — הוסף client_name.
 - "כמה לגבות" / "מה פתוח אצל <לקוח>" → query_billing (חשבוניות גבייה — *לא* דיווחי שעות)
-- **סימון תשלום/חשבונית — פעולה כספית רגישה:** "סמן ש<לקוח> שילם" → update_billing (אשר עם חגי קודם!). **תמיד העבר period מדויק** של החיוב/ים שמסמנים — אל תסמן "כל הפתוח". אם יש כמה חיובים פתוחים ולא ברור אילו — שאל לפני. **וקריטי: דווח בדיוק מה שהכלי החזיר, מילה במילה. אל תוסיף, אל תמציא, ואל תטען שסימנת חיוב שהכלי לא החזיר.** אם טעית — תקן בכנות ("סימנתי בטעות X"), אל תכחיש.
+- **סימון תשלום/חשבונית — פעולה כספית רגישה:** "סמן ש<לקוח> שילם" → update_billing (אשר עם חגי קודם!). **זהה את החיוב הספציפי — העבר amount (הסכום) ו/או period.** אם המשתמש הזכיר או מצא חיוב לפי סכום ("תסמן את ה-15,146") — העבר **amount=15146**, אל תשאל שוב ואל תאבד את זה. אל תסמן "כל הפתוח". **וקריטי: דווח בדיוק מה שהכלי החזיר, מילה במילה. אל תוסיף, אל תמציא, ואל תטען שסימנת חיוב שהכלי לא החזיר.** אם טעית — תקן בכנות ("סימנתי בטעות X"), אל תכחיש.
 - "צור משימה..." / "סגור משימה..." / "המשימות שלי" → manage_tasks
 - "כמה צרכת / כמה אתה עולה לי" → usage_report (today). מסור את המספרים כפי שהם — אל תסכם ל"אפס/חינמי" גם אם קטן.
 - "גרף שבועי/חודשי" → usage_report עם week/month, ו**הדבק את הפלט כמו שהוא, כולל גרף העמודות (השורות עם █ ו-░)**. אל תתאר אותו במילים ואל תמחק את הגרף.
@@ -619,6 +620,7 @@ async function handleTool(name: string, input: Record<string, unknown>, msg: Inb
     case 'update_billing':
       return await updateBilling({
         client_name:     s('client_name'),
+        amount:          typeof input.amount === 'number' ? input.amount : undefined,
         period:          s('period') || undefined,
         is_paid:         b('is_paid'),
         invoice_created: b('invoice_created'),
